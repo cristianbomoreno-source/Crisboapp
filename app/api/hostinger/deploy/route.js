@@ -47,6 +47,7 @@ export async function POST(req) {
           password,
           remotePath,
           files,
+          onStatus: (message) => send({ type: "status", stage: "ftp-clean", message }),
           onProgress: (path, index, total) => send({ type: "progress", stage: "ftp", path, index, total }),
         });
 

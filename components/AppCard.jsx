@@ -29,12 +29,14 @@ export default function AppCard({ app, onUpdate, onOpen, onEdit }) {
   const [lastCommit, setLastCommit] = useState(null);
   const [vercelInfo, setVercelInfo] = useState(null);
   const [error, setError] = useState(false);
+  const [faviconFailed, setFaviconFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
       setError(false);
+      setFaviconFailed(false);
       try {
         const commitsRes = await fetch(`/api/github/${app.github.owner}/${app.github.repo}/commits`);
         const commitsData = await commitsRes.json();
@@ -67,8 +69,11 @@ export default function AppCard({ app, onUpdate, onOpen, onEdit }) {
     ? "unknown"
     : "unknown";
 
-  const domain = vercelInfo?.domains?.[0]?.name || app.domain || null;
+  const domain = vercelInfo?.domains?.[0]?.name || app.hostinger?.domain || app.domain || null;
   const hostingLabel = app.vercel?.enabled ? "Vercel" : app.hostinger?.enabled ? "Hostinger" : "—";
+  const faviconUrl = domain
+    ? `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(domain)}`
+    : null;
 
   return (
     <div
@@ -77,8 +82,17 @@ export default function AppCard({ app, onUpdate, onOpen, onEdit }) {
     >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-lg bg-panel2 border border-border flex items-center justify-center text-lg flex-shrink-0">
-            {app.emoji || "▲"}
+          <div className="w-10 h-10 rounded-lg bg-panel2 border border-border flex items-center justify-center text-lg flex-shrink-0 overflow-hidden">
+            {faviconUrl && !faviconFailed ? (
+              <img
+                src={faviconUrl}
+                alt=""
+                className="w-6 h-6 object-contain"
+                onError={() => setFaviconFailed(true)}
+              />
+            ) : (
+              app.emoji || "▲"
+            )}
           </div>
           <div className="min-w-0">
             <h3 className="font-semibold text-[14.5px] truncate">{app.name}</h3>

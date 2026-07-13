@@ -39,7 +39,7 @@ function DetailInner() {
     fetch("/api/me").then((r) => r.json()).then((d) => setUser(d.user));
     const apps = getApps();
     const found = apps.find((a) => a.github.owner === owner && a.github.repo === repo);
-    setApp(
+    const resolvedApp =
       found || {
         id: `${owner}/${repo}`,
         name: repo,
@@ -47,8 +47,9 @@ function DetailInner() {
         github: { owner, repo, defaultBranch: "main" },
         vercel: { enabled: false },
         hostinger: { enabled: false },
-      }
-    );
+      };
+    setApp(resolvedApp);
+    if (resolvedApp.hostinger?.domain) setDomainInput(resolvedApp.hostinger.domain);
 
     fetch(`/api/github/${owner}/${repo}/commits`)
       .then((r) => r.json())

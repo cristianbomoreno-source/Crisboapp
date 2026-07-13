@@ -38,6 +38,7 @@ export default function ConnectAppModal({ onClose, onSaved, editApp }) {
     username: isEditing ? editApp.hostinger?.username || "" : "",
     password: isEditing ? editApp.hostinger?.password || "" : "",
     remotePath: isEditing ? editApp.hostinger?.remotePath || "/public_html" : "/public_html",
+    domain: isEditing ? editApp.hostinger?.domain || "" : "",
   });
 
   useEffect(() => {
@@ -320,6 +321,17 @@ export default function ConnectAppModal({ onClose, onSaved, editApp }) {
                     placeholder="/public_html"
                     className="w-full bg-panel2 border border-border rounded-lg px-3 py-2.5 text-[13px] outline-none focus:border-accent"
                   />
+                  <div>
+                    <input
+                      value={ftp.domain}
+                      onChange={(e) => setFtp({ ...ftp, domain: e.target.value })}
+                      placeholder="tudominio.com"
+                      className="w-full bg-panel2 border border-border rounded-lg px-3 py-2.5 text-[13px] outline-none focus:border-accent"
+                    />
+                    <p className="text-[11px] text-muted mt-1.5">
+                      Dominio real del sitio — se usa para mostrar su logo (favicon) en la tarjeta y el link directo.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
