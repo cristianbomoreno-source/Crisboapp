@@ -1,17 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, LayoutGrid } from "lucide-react";
+import { Plus, LayoutGrid, Github } from "lucide-react";
 import TopNav from "@/components/TopNav";
 import AppCard from "@/components/AppCard";
 import ConnectAppModal from "@/components/ConnectAppModal";
 import DeployModal from "@/components/DeployModal";
 import { ToastProvider } from "@/components/Toasts";
-import { getApps } from "@/lib/appsStore";
+
+async function fetchApps() {
+  const res = await fetch("/api/apps");
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.apps || [];
+}
 
 function DashboardInner() {
   const [user, setUser] = useState(null);
   const [apps, setApps] = useState([]);
+  const [loadingApps, setLoadingApps] = useState(true);
   const [showConnect, setShowConnect] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [deployTarget, setDeployTarget] = useState(null);
@@ -20,14 +27,38 @@ function DashboardInner() {
     fetch("/api/me")
       .then((r) => r.json())
       .then((d) => setUser(d.user));
-    setApps(getApps());
+    fetchApps()
+      .then(setApps)
+      .finally(() => setLoadingApps(false));
   }, []);
+
+  const refreshApps = () => fetchApps().then(setApps);
 
   return (
     <div className="min-h-screen bg-bg">
       <TopNav user={user} />
 
       <main className="max-w-6xl mx-auto px-5 py-10">
+        {user && !user.githubConnected && (
+          <div className="mb-8 flex items-center justify-between gap-4 bg-panel border border-border rounded-xl2 px-5 py-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-panel2 border border-border flex items-center justify-center flex-shrink-0">
+                <Github size={16} />
+              </div>
+              <div>
+                <p className="text-[13.5px] font-medium">Vincula tu cuenta de GitHub</p>
+                <p className="text-[12px] text-muted">Necesario para conectar y actualizar tus aplicaciones.</p>
+              </div>
+            </div>
+            <a
+              href="/api/auth/github"
+              className="flex-shrink-0 bg-white text-black text-[12.5px] font-semibold rounded-lg px-4 py-2"
+            >
+              Vincular
+            </a>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-xl font-bold tracking-tight">Tus aplicaciones</h1>
@@ -44,7 +75,9 @@ function DashboardInner() {
           </button>
         </div>
 
-        {apps.length === 0 ? (
+        {loadingApps ? (
+          <p className="text-[13px] text-muted">Cargando...</p>
+        ) : apps.length === 0 ? (
           <div className="border border-dashed border-border rounded-xl2 py-20 flex flex-col items-center text-center">
             <div className="w-12 h-12 rounded-xl bg-panel2 border border-border flex items-center justify-center mb-4">
               <LayoutGrid size={20} className="text-muted" />
@@ -81,8 +114,8 @@ function DashboardInner() {
       {showConnect && (
         <ConnectAppModal
           onClose={() => setShowConnect(false)}
-          onSaved={(app) => {
-            setApps(getApps());
+          onSaved={() => {
+            refreshApps();
             setShowConnect(false);
           }}
         />
@@ -92,8 +125,8 @@ function DashboardInner() {
         <ConnectAppModal
           editApp={editTarget}
           onClose={() => setEditTarget(null)}
-          onSaved={(app) => {
-            setApps(getApps());
+          onSaved={() => {
+            refreshApps();
             setEditTarget(null);
           }}
         />

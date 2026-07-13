@@ -6,7 +6,6 @@ import { ArrowLeft, RotateCcw, ExternalLink, Shield, ShieldAlert, UploadCloud } 
 import TopNav from "@/components/TopNav";
 import DeployModal from "@/components/DeployModal";
 import { ToastProvider, useToast } from "@/components/Toasts";
-import { getApps } from "@/lib/appsStore";
 
 function timeAgo(dateStr) {
   if (!dateStr) return "—";
@@ -37,19 +36,24 @@ function DetailInner() {
 
   useEffect(() => {
     fetch("/api/me").then((r) => r.json()).then((d) => setUser(d.user));
-    const apps = getApps();
-    const found = apps.find((a) => a.github.owner === owner && a.github.repo === repo);
-    const resolvedApp =
-      found || {
-        id: `${owner}/${repo}`,
-        name: repo,
-        emoji: "📦",
-        github: { owner, repo, defaultBranch: "main" },
-        vercel: { enabled: false },
-        hostinger: { enabled: false },
-      };
-    setApp(resolvedApp);
-    if (resolvedApp.hostinger?.domain) setDomainInput(resolvedApp.hostinger.domain);
+
+    fetch("/api/apps")
+      .then((r) => (r.ok ? r.json() : { apps: [] }))
+      .then((data) => {
+        const apps = data.apps || [];
+        const found = apps.find((a) => a.github.owner === owner && a.github.repo === repo);
+        const resolvedApp =
+          found || {
+            id: `${owner}/${repo}`,
+            name: repo,
+            emoji: "📦",
+            github: { owner, repo, defaultBranch: "main" },
+            vercel: { enabled: false },
+            hostinger: { enabled: false },
+          };
+        setApp(resolvedApp);
+        if (resolvedApp.hostinger?.domain) setDomainInput(resolvedApp.hostinger.domain);
+      });
 
     fetch(`/api/github/${owner}/${repo}/commits`)
       .then((r) => r.json())

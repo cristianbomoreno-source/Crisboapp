@@ -3,7 +3,6 @@
 import { useRef, useState } from "react";
 import { X, UploadCloud, FileArchive, CheckCircle2, XCircle } from "lucide-react";
 import { useToast } from "./Toasts";
-import { upsertApp } from "@/lib/appsStore";
 
 async function streamRequest(url, formData, onEvent) {
   const res = await fetch(url, { method: "POST", body: formData });
@@ -111,7 +110,11 @@ export default function DeployModal({ app, onClose }) {
 
       setResult({ ok: true, message: "Deployment exitoso.", commitUrl: ghResult?.commitUrl });
       if (ghResult?.framework && ghResult.framework !== app.framework) {
-        upsertApp({ ...app, framework: ghResult.framework });
+        fetch("/api/apps", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...app, framework: ghResult.framework }),
+        }).catch(() => {});
       }
       update(toastId, {
         type: "success",

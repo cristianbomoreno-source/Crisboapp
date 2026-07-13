@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { X, Github, Search, ChevronRight, ChevronLeft } from "lucide-react";
-import { upsertApp, newAppId, getVercelCreds, saveVercelCreds } from "@/lib/appsStore";
+
+function newAppId() {
+  return `app_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 const EMOJIS = ["▲", "🚀", "🎨", "🛒", "📦", "🐙", "🔥", "🌐", "💼", "🎯"];
 
@@ -30,6 +33,9 @@ export default function ConnectAppModal({ onClose, onSaved, editApp }) {
   const [vercelProjectId, setVercelProjectId] = useState(isEditing ? editApp.vercel?.projectId || "" : "");
   const [deployHookUrl, setDeployHookUrl] = useState(isEditing ? editApp.vercel?.deployHookUrl || "" : "");
   const [loadingVercel, setLoadingVercel] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [githubNotConnected, setGithubNotConnected] = useState(false);
 
   const [ftp, setFtp] = useState({
     protocol: isEditing ? editApp.hostinger?.protocol || "ftp" : "ftp",
@@ -44,22 +50,16 @@ export default function ConnectAppModal({ onClose, onSaved, editApp }) {
   useEffect(() => {
     if (isEditing) {
       // Ya sabemos el repo, no hace falta volver a listar todos.
-      if (!vercelToken) {
-        const creds = getVercelCreds();
-        if (creds) {
-          setVercelToken(creds.token || "");
-          setVercelTeamId(creds.teamId || "");
-        }
-      }
       return;
     }
-    const creds = getVercelCreds();
-    if (creds) {
-      setVercelToken(creds.token || "");
-      setVercelTeamId(creds.teamId || "");
-    }
     fetch("/api/repos")
-      .then((r) => r.json())
+      .then((r) => {
+        if (r.status === 409) {
+          setGithubNotConnected(true);
+          return { repos: [] };
+        }
+        return r.json();
+      })
       .then((data) => setRepos(data.repos || []))
       .finally(() => setLoadingRepos(false));
   }, []);
@@ -71,7 +71,6 @@ export default function ConnectAppModal({ onClose, onSaved, editApp }) {
   const loadVercelProjects = async () => {
     if (!vercelToken) return;
     setLoadingVercel(true);
-    saveVercelCreds({ token: vercelToken, teamId: vercelTeamId });
     try {
       const q = new URLSearchParams({ token: vercelToken, ...(vercelTeamId ? { teamId: vercelTeamId } : {}) });
       const res = await fetch(`/api/vercel/projects?${q}`);
@@ -82,7 +81,7 @@ export default function ConnectAppModal({ onClose, onSaved, editApp }) {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const app = {
       id: isEditing ? editApp.id : newAppId(),
       name: name || selectedRepo.name,
@@ -105,8 +104,20 @@ export default function ConnectAppModal({ onClose, onSaved, editApp }) {
           : { enabled: false },
       hostinger: hosting === "hostinger" ? { enabled: true, ...ftp, port: ftp.port ? Number(ftp.port) : undefined } : { enabled: false },
     };
-    upsertApp(app);
-    onSaved(app);
+    setSaving(true);
+    try {
+      const res = await fetch("/api/apps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(app),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "No se pudo guardar la aplicación");
+      onSaved(app);
+    } catch (err) {
+      setSaveError(err.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -134,6 +145,17 @@ export default function ConnectAppModal({ onClose, onSaved, editApp }) {
               </div>
               {loadingRepos ? (
                 <p className="text-[12.5px] text-muted py-6 text-center">Cargando repositorios...</p>
+              ) : githubNotConnected ? (
+                <div className="text-center py-8">
+                  <p className="text-[13px] mb-3">Todavía no vinculaste tu cuenta de GitHub.</p>
+                  <a
+                    href="/api/auth/github"
+                    className="inline-flex items-center gap-2 bg-white text-black font-semibold text-[12.5px] rounded-lg px-4 py-2.5"
+                  >
+                    <Github size={14} />
+                    Vincular GitHub
+                  </a>
+                </div>
               ) : (
                 <div className="flex flex-col gap-1.5 max-h-72 overflow-y-auto scrollbar-thin">
                   {filteredRepos.map((r) => (
@@ -356,12 +378,16 @@ export default function ConnectAppModal({ onClose, onSaved, editApp }) {
               Siguiente <ChevronRight size={14} />
             </button>
           ) : (
-            <button
-              onClick={handleSave}
-              className="bg-accent text-white text-[13px] font-medium px-4 py-2 rounded-lg"
-            >
-              Guardar aplicación
-            </button>
+            <div className="flex flex-col items-end gap-1.5">
+              {saveError && <span className="text-[11px] text-red-400">{saveError}</span>}
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="bg-accent text-white text-[13px] font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+              >
+                {saving ? "Guardando..." : "Guardar aplicación"}
+              </button>
+            </div>
           )}
         </div>
       </div>

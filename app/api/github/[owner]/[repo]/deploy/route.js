@@ -14,9 +14,14 @@ export async function POST(req, { params }) {
       const send = (obj) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
 
       try {
-        const session = getSession();
+        const session = await getSession();
         if (!session) {
           send({ type: "error", message: "No autenticado." });
+          controller.close();
+          return;
+        }
+        if (!session.githubConnected) {
+          send({ type: "error", message: "Tu cuenta de GitHub no esta vinculada. Vincula GitHub desde el dashboard." });
           controller.close();
           return;
         }

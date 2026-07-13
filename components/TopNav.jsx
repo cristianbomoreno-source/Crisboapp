@@ -1,6 +1,6 @@
 "use client";
 
-import { Zap, LogOut } from "lucide-react";
+import { Zap, LogOut, Github, CheckCircle2 } from "lucide-react";
 
 export default function TopNav({ user }) {
   return (
@@ -15,11 +15,27 @@ export default function TopNav({ user }) {
 
         {user && (
           <div className="flex items-center gap-3">
+            {user.githubConnected ? (
+              <span
+                className="hidden sm:inline-flex items-center gap-1 text-[11px] text-emerald-400"
+                title={`GitHub vinculado: ${user.githubLogin}`}
+              >
+                <CheckCircle2 size={12} /> GitHub
+              </span>
+            ) : (
+              <a
+                href="/api/auth/github"
+                className="hidden sm:inline-flex items-center gap-1 text-[11px] text-muted hover:text-white"
+              >
+                <Github size={12} /> Vincular GitHub
+              </a>
+            )}
+
             <div className="flex items-center gap-2">
               {user.avatarUrl && (
-                <img src={user.avatarUrl} alt={user.login} className="w-6 h-6 rounded-full" />
+                <img src={user.avatarUrl} alt={user.name} className="w-6 h-6 rounded-full" />
               )}
-              <span className="text-[13px] text-muted hidden sm:inline">{user.login}</span>
+              <span className="text-[13px] text-muted hidden sm:inline">{user.name}</span>
             </div>
             <form action="/api/auth/logout" method="POST">
               <button

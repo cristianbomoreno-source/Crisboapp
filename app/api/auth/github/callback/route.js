@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { exchangeCodeForToken, getViewer } from "@/lib/github";
-import { setSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
+import { query } from "@/lib/db";
+
+export const runtime = "nodejs";
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -8,9 +11,13 @@ export async function GET(request) {
   const state = searchParams.get("state");
   const savedState = request.cookies.get("crisbofiles_oauth_state")?.value;
 
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
   if (!code || !state || state !== savedState) {
-    const res = NextResponse.redirect(new URL("/login?error=state_mismatch", request.url));
-    return res;
+    return NextResponse.redirect(new URL("/dashboard?error=github_state_mismatch", request.url));
   }
 
   try {
@@ -18,21 +25,19 @@ export async function GET(request) {
     const token = await exchangeCodeForToken(code, redirectUri);
     const viewer = await getViewer(token);
 
-    // Siempre se redirige a una ruta interna de la app, nunca a github.com.
-    // "/" decide internamente (app/page.jsx) si manda a /dashboard o /login
-    // segun si ya hay sesion.
-    const res = NextResponse.redirect(new URL("/", request.url));
-    setSession(res, {
-      token,
-      login: viewer.login,
-      name: viewer.name,
-      avatarUrl: viewer.avatar_url,
-    });
+    // Se guarda en la fila del usuario ya logueado con Google — asi queda
+    // vinculado a la cuenta, no a esta cookie ni a este navegador.
+    await query(
+      `UPDATE users SET github_token = $1, github_login = $2, github_avatar_url = $3 WHERE id = $4`,
+      [token, viewer.login, viewer.avatar_url, session.userId]
+    );
+
+    const res = NextResponse.redirect(new URL("/dashboard", request.url));
     res.cookies.set("crisbofiles_oauth_state", "", { path: "/", maxAge: 0 });
     return res;
   } catch (err) {
     return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent(err.message)}`, request.url)
+      new URL(`/dashboard?error=${encodeURIComponent(err.message)}`, request.url)
     );
   }
 }
