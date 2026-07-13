@@ -136,7 +136,7 @@ app/api/
 `lib/vercel.js` usa endpoints públicos documentados de la API de Vercel tal
 como están hoy. Si algo empieza a fallar, ese archivo es el primer lugar a
 revisar contra la documentación oficial de Vercel.
-
+Actualización de configuración.
 ## Notas de seguridad
 
 - El token de GitHub y las credenciales de Vercel/Hostinger se guardan en
