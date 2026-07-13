@@ -1,15 +1,13 @@
 "use client";
 
-import { Zap, LogOut, Github, CheckCircle2 } from "lucide-react";
+import { LogOut, Github, CheckCircle2 } from "lucide-react";
 
 export default function TopNav({ user }) {
   return (
     <header className="sticky top-0 z-40 bg-bg/90 backdrop-blur-md border-b border-border">
       <div className="max-w-6xl mx-auto px-5 h-14 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
-            <Zap size={15} className="text-white" fill="white" />
-          </div>
+          <img src="/logo-128.png" alt="crisbofiles" className="w-7 h-7 rounded-lg" />
           <span className="font-semibold text-[15px] tracking-tight">crisbofiles</span>
         </div>
 

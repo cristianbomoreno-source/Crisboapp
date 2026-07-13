@@ -3,6 +3,10 @@ import "./globals.css";
 export const metadata = {
   title: "crisbofiles — Centro de control de despliegues",
   description: "Administra, actualiza y despliega tus aplicaciones desde una sola interfaz.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({ children }) {

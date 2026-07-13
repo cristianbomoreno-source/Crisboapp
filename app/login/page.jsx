@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense } from "react";
-import { Zap } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
 function GoogleIcon() {
@@ -22,9 +21,7 @@ function LoginContent() {
   return (
     <main className="min-h-screen flex items-center justify-center bg-bg px-6">
       <div className="w-full max-w-sm text-center">
-        <div className="w-12 h-12 mx-auto mb-6 rounded-xl bg-accent flex items-center justify-center">
-          <Zap size={22} className="text-white" fill="white" />
-        </div>
+        <img src="/logo.png" alt="crisbofiles" className="w-16 h-16 mx-auto mb-6 rounded-2xl" />
         <h1 className="text-2xl font-bold tracking-tight mb-2">crisbofiles</h1>
         <p className="text-muted text-sm mb-10">
           Tu cuenta personal para administrar y desplegar todas tus aplicaciones.
