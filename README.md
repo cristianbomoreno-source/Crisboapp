@@ -1,99 +1,152 @@
-# Mi Restaurante — App de ventas e inventario
+# crisbofiles
 
-Este es tu proyecto convertido en una app web real (React + Vite), lista para
-subir a GitHub y publicar.
+Cuenta personal para administrar, actualizar y desplegar tus aplicaciones
+desde una sola interfaz — sin usar Git manualmente.
 
-## Cómo se guardan los datos
+## Qué cambió en esta versión (importante)
 
-La app ya está conectada a Supabase (base de datos real en la nube). Al crear
-una cuenta con correo y contraseña, esa cuenta y todos los datos del negocio
-(productos, ventas, insumos, caja, etc.) quedan guardados de forma
-permanente en el servidor — no dependen del celular ni del navegador que
-uses. Si entras desde otro dispositivo con el mismo correo y contraseña,
-verás la misma información.
+Antes, la sesión y las apps que conectabas vivían en el navegador (cookie +
+localStorage) — por eso se perdían al borrar datos del navegador o cambiar
+de dispositivo. Ahora:
 
-Los trabajadores y el Administrador de Caja siguen entrando con su PIN
-(configurado en Ajustes → Cuenta y trabajadores) sin necesidad de correo ni
-contraseña propios — pero para que el PIN funcione en un dispositivo, el
-administrador debe haber iniciado sesión con su correo al menos una vez en
-ese mismo dispositivo/navegador.
+- **Inicias sesión con tu cuenta de Google** (es tu identidad real en la app).
+- **GitHub se vincula una sola vez** a esa cuenta de Google — el token queda
+  guardado en una base de datos, no en el navegador. Vas a poder borrar el
+  historial de Safari las veces que quieras: la próxima vez que entres con
+  Google, GitHub va a seguir vinculado.
+- **Las aplicaciones que conectes (repo + Vercel/Hostinger) también viven en
+  la base de datos**, no en localStorage.
 
-## 1. Probarlo en tu computador
+**Migración:** como cambió el lugar donde se guarda todo, las apps que
+habías conectado en la versión anterior (localStorage) no van a aparecer
+solas acá — es la última vez que las vas a tener que volver a conectar,
+después de esto quedan guardadas para siempre en tu cuenta.
 
-Necesitas tener [Node.js](https://nodejs.org) instalado (versión 18 o más
-nueva). Luego, en una terminal, dentro de esta carpeta:
+## Qué hace hoy (funcional de verdad)
 
-```bash
-npm install
-npm run dev
+- Login con Google (identidad de la cuenta).
+- Vincular GitHub una sola vez, guardado de forma persistente.
+- Dashboard con todas tus apps: framework, estado, dominio (con su favicon
+  real), repo, hosting y última actualización.
+- Conectar una app → repo de GitHub + opcionalmente Vercel o Hostinger.
+  Editable después sin duplicar la tarjeta.
+- Actualizar con un botón: zip → valida → ignora `node_modules`/`.next`/
+  `.git`/`dist`/`build` → **reemplaza por completo** el contenido:
+  - En GitHub: un solo commit atómico que reemplaza todo el árbol (nada
+    viejo queda).
+  - En Hostinger: vacía la carpeta remota antes de subir el zip nuevo.
+- Historial de commits + restaurar cualquier versión anterior.
+- Verificación de DNS/SSL de dominios.
+- Notificaciones en tiempo real de cada paso.
+
+## Puesta en marcha (hay pasos nuevos — leer completo antes de desplegar)
+
+### 1. Base de datos Postgres
+
+La forma mas simple es **Vercel Postgres** (no sale de la misma pantalla de
+tu proyecto):
+
+1. En tu proyecto en Vercel → pestaña **Storage** → **Create Database** →
+   **Postgres**.
+2. Sigue el asistente (nombre, región). Al terminar, Vercel conecta
+   automáticamente la base de datos a tu proyecto y agrega las variables de
+   entorno necesarias (`POSTGRES_URL`, etc.) — el código ya las reconoce.
+3. En la misma pantalla de la base de datos, busca la pestaña **Query** (o
+   "Data" → "Query editor" según la versión de Vercel) y pega el contenido
+   completo del archivo `schema.sql` que viene en este zip. Ejecútalo una
+   vez — crea las tablas `users` y `apps`.
+
+Alternativas si prefieres: **Supabase** o **Neon** (ambos tienen plan
+gratuito) — creas la base ahí, copias su cadena de conexión, y la pegas
+como la variable de entorno `DATABASE_URL` en Vercel. El paso de correr
+`schema.sql` es el mismo (ambos tienen un editor SQL en su panel).
+
+### 2. Crear credenciales de Google OAuth
+
+1. Ve a [Google Cloud Console](https://console.cloud.google.com/) → crea un
+   proyecto nuevo (o usa uno existente).
+2. **APIs & Services** → **OAuth consent screen** → tipo **External** →
+   completa nombre de la app y tu correo. No hace falta publicarla para uso
+   personal (queda en modo "Testing"; agrega tu propio correo en
+   "Test users").
+3. **APIs & Services** → **Credentials** → **Create Credentials** → **OAuth
+   client ID** → tipo **Web application**.
+4. En **Authorized redirect URIs** agrega:
+   `https://<tu-dominio-de-vercel>/api/auth/google/callback`
+5. Copia el **Client ID** y el **Client Secret**.
+
+### 3. Crear (o reutilizar) la OAuth App de GitHub
+
+Si ya la creaste antes, revisa que su **Authorization callback URL** siga
+siendo `https://<tu-dominio-de-vercel>/api/auth/github/callback`. Si no la
+tienes, mismo proceso de siempre: GitHub → Settings → Developer settings →
+OAuth Apps → New OAuth App.
+
+### 4. Variables de entorno en Vercel
+
+Project Settings → Environment Variables:
+
+- `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` (paso 3)
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (paso 2)
+- `DATABASE_URL` (si usaste Vercel Postgres, ya está puesta sola; si usaste
+  Supabase/Neon, pégala tú)
+- `SESSION_SECRET` — cualquier cadena larga y aleatoria (por ejemplo,
+  generá una en https://generate-secret.vercel.app/32)
+
+### 5. Redeploy
+
+Sube este código a tu repo y espera el redeploy (o dispáralo manualmente
+desde Vercel) para que tome las variables nuevas.
+
+### 6. Usarlo
+
+1. Abre tu URL → **Continuar con Google**.
+2. Vas a ver un aviso para **vincular GitHub** — hazlo una sola vez.
+3. **Conectar aplicación** → elige el repo, dale nombre/ícono, y
+   opcionalmente conecta Vercel o Hostinger (con su dominio, para que se
+   vea el favicon real en la tarjeta).
+4. **Actualizar** cuando quieras publicar cambios.
+
+## Arquitectura
+
+```
+lib/
+  db.js         -> Pool de Postgres (creado de forma perezosa)
+  session.js     -> cookie firmada (HMAC) con solo el userId + lookup en DB
+  google.js       -> OAuth de Google (login principal)
+  github.js        -> OAuth de GitHub (vinculo), repos, commit atomico, historial, restore
+  vercel.js          -> proyectos, deployments, dominios, deploy hooks
+  hostinger.js         -> FTP/FTPS/SFTP, con limpieza de la carpeta remota antes de subir
+  zip.js                -> extraccion, filtrado, validacion, deteccion de framework
+  dns.js                 -> verificacion de DNS/SSL
+  providers.js             -> registro de proveedores disponibles/futuros
+app/api/
+  auth/google/(callback)     -> login principal
+  auth/github/(callback)      -> vincular GitHub a la cuenta ya iniciada
+  auth/logout
+  me                           -> perfil de la sesion actual
+  apps, apps/[id]                -> CRUD de aplicaciones en la base de datos
+  repos                           -> listar repos de GitHub del usuario
+  github/[owner]/[repo]/...         -> commits, restore, deploy (commit atomico)
+  vercel/..., hostinger/deploy, domain/check
 ```
 
-Esto te da un link como `http://localhost:5173` para probar la app en tu
-navegador antes de publicarla.
+## Sobre la integración con Vercel
 
-## 2. Subir el proyecto a GitHub
+`lib/vercel.js` usa endpoints públicos documentados de la API de Vercel tal
+como están hoy. Si algo empieza a fallar, ese archivo es el primer lugar a
+revisar contra la documentación oficial de Vercel.
 
-Como ya tienes cuenta en GitHub:
+## Notas de seguridad
 
-1. Entra a github.com y crea un **repositorio nuevo** (botón verde "New").
-   Ponle un nombre como `mi-restaurante-app`. Déjalo público o privado, como
-   prefieras. No marques ninguna casilla de "agregar README" (ya tienes uno).
-
-2. En tu terminal, dentro de esta carpeta del proyecto:
-
-```bash
-git init
-git add .
-git commit -m "Primera versión de mi app"
-git branch -M main
-git remote add origin https://github.com/TU-USUARIO/mi-restaurante-app.git
-git push -u origin main
-```
-
-Reemplaza `TU-USUARIO` por tu nombre de usuario de GitHub. GitHub te va a
-pedir iniciar sesión la primera vez (puede pedirte un "token" en vez de
-contraseña — GitHub te guía para crearlo si hace falta).
-
-## 3. Publicarlo con Vercel (gratis)
-
-1. Entra a [vercel.com](https://vercel.com) y crea una cuenta usando tu
-   cuenta de GitHub (botón "Continue with GitHub").
-2. Toca **"Add New Project"**.
-3. Selecciona el repositorio `mi-restaurante-app` que acabas de subir.
-4. Vercel detecta automáticamente que es un proyecto Vite. No necesitas
-   cambiar nada — solo toca **"Deploy"**.
-5. En un minuto te da una URL real, algo como
-   `mi-restaurante-app.vercel.app`, que ya puedes abrir desde cualquier
-   celular o computador.
-
-Cada vez que quieras actualizar la app: haz tus cambios, y luego:
-
-```bash
-git add .
-git commit -m "Describe qué cambiaste"
-git push
-```
-
-Vercel actualiza la app publicada automáticamente en cuanto detecta el nuevo
-`push`.
-
-## 4. Base de datos real (Supabase) — ya conectada ✅
-
-Ya completaste esta parte siguiendo `SUPABASE_SETUP.md`: creaste el proyecto
-en Supabase, corriste `supabase_schema.sql`, y agregaste las llaves
-(`VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`) en Vercel. Gracias a eso,
-las cuentas y los datos del negocio ya no dependen de `localStorage` — viven
-en la base de datos de Supabase y son los mismos sin importar desde qué
-celular o computador entres.
-
-## Estructura del proyecto
-
-```
-mi-restaurante-app/
-├── index.html
-├── package.json
-├── vite.config.js
-├── src/
-│   ├── main.jsx      ← punto de entrada de React
-│   └── App.jsx       ← toda tu app (lo que ya conoces)
-```
+- El token de GitHub y las credenciales de Vercel/Hostinger se guardan en
+  la base de datos **sin cifrar** (texto plano en la columna). Es un paso
+  adelante enorme respecto a tenerlas en el navegador de cada quien, pero
+  para un producto realmente multiusuario el siguiente paso sería cifrarlas
+  en reposo (por ejemplo con `pgcrypto` o cifrado a nivel de aplicación
+  antes de guardar).
+- La cookie de sesión ahora solo contiene el `userId`, firmado con HMAC
+  (`SESSION_SECRET`) para que no se pueda falsificar — pero sigue siendo de
+  larga duración (30 días) sin revocación server-side individual. Para algo
+  más robusto, el siguiente paso sería una tabla de sesiones con expiración
+  y logout real del lado del servidor.
