@@ -30,6 +30,13 @@ function DashboardInner() {
     fetchApps()
       .then(setApps)
       .finally(() => setLoadingApps(false));
+
+    // Si agregas o editas una app desde otra sesion/dispositivo, esta lista
+    // se actualiza sola en menos de 15 segundos, sin recargar la pagina.
+    const interval = setInterval(() => {
+      fetchApps().then(setApps);
+    }, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const refreshApps = () => fetchApps().then(setApps);

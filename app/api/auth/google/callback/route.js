@@ -29,6 +29,7 @@ export async function GET(request) {
       [profile.sub, profile.email, profile.name, profile.picture]
     );
     const userId = rows[0].id;
+    console.log(`[auth/google] login OK — userId=${userId} email=${profile.email} google_id=${profile.sub}`);
 
     const res = NextResponse.redirect(new URL("/", request.url));
     setSessionCookie(res, userId);

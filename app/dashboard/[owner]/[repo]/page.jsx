@@ -59,6 +59,14 @@ function DetailInner() {
       .then((r) => r.json())
       .then((d) => setCommits(d.commits || []))
       .finally(() => setLoadingCommits(false));
+
+    const interval = setInterval(() => {
+      fetch(`/api/github/${owner}/${repo}/commits`)
+        .then((r) => r.json())
+        .then((d) => setCommits(d.commits || []))
+        .catch(() => {});
+    }, 10000);
+    return () => clearInterval(interval);
   }, [owner, repo]);
 
   const handleRestore = async (sha) => {

@@ -12,6 +12,7 @@ export async function POST(req, { params }) {
   const stream = new ReadableStream({
     async start(controller) {
       const send = (obj) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      let zipUrl = null;
 
       try {
         const session = await getSession();
@@ -26,18 +27,22 @@ export async function POST(req, { params }) {
           return;
         }
 
-        const formData = await req.formData();
-        const zipFile = formData.get("zip");
-        const message = formData.get("message") || "Actualizacion desde crisbofiles";
+        const body = await req.json();
+        zipUrl = body.zipUrl;
+        const message = body.message || "Actualizacion desde crisbofiles";
 
-        if (!zipFile) {
+        if (!zipUrl) {
           send({ type: "error", message: "Falta el archivo .zip." });
           controller.close();
           return;
         }
 
         send({ type: "status", stage: "validating", message: "Validando estructura del proyecto..." });
-        const arrayBuffer = await zipFile.arrayBuffer();
+        const zipRes = await fetch(zipUrl);
+        if (!zipRes.ok) {
+          throw new Error(`No se pudo descargar el zip subido (status ${zipRes.status})`);
+        }
+        const arrayBuffer = await zipRes.arrayBuffer();
         const files = await extractZip(arrayBuffer);
 
         const validation = validateProject(files);

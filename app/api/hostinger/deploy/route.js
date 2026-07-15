@@ -10,25 +10,30 @@ export async function POST(req) {
   const stream = new ReadableStream({
     async start(controller) {
       const send = (obj) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      let zipUrl = null;
 
       try {
-        const formData = await req.formData();
-        const zipFile = formData.get("zip");
-        const protocol = formData.get("protocol") || "ftp";
-        const host = formData.get("host");
-        const port = Number(formData.get("port")) || undefined;
-        const username = formData.get("username");
-        const password = formData.get("password");
-        const remotePath = formData.get("remotePath") || "/public_html";
+        const body = await req.json();
+        zipUrl = body.zipUrl;
+        const protocol = body.protocol || "ftp";
+        const host = body.host;
+        const port = Number(body.port) || undefined;
+        const username = body.username;
+        const password = body.password;
+        const remotePath = body.remotePath || "/public_html";
 
-        if (!zipFile || !host || !username || !password) {
+        if (!zipUrl || !host || !username || !password) {
           send({ type: "error", message: "Faltan campos requeridos para Hostinger." });
           controller.close();
           return;
         }
 
         send({ type: "status", stage: "validating", message: "Validando estructura del proyecto..." });
-        const arrayBuffer = await zipFile.arrayBuffer();
+        const zipRes = await fetch(zipUrl);
+        if (!zipRes.ok) {
+          throw new Error(`No se pudo descargar el zip subido (status ${zipRes.status})`);
+        }
+        const arrayBuffer = await zipRes.arrayBuffer();
         const files = await extractZip(arrayBuffer);
         const validation = validateProject(files);
         if (!validation.valid) {

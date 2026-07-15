@@ -33,10 +33,11 @@ export default function AppCard({ app, onUpdate, onOpen, onEdit }) {
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      setLoading(true);
+
+    async function load(isFirstLoad) {
+      if (isFirstLoad) setLoading(true);
       setError(false);
-      setFaviconFailed(false);
+      if (isFirstLoad) setFaviconFailed(false);
       try {
         const commitsRes = await fetch(`/api/github/${app.github.owner}/${app.github.repo}/commits`);
         const commitsData = await commitsRes.json();
@@ -57,9 +58,17 @@ export default function AppCard({ app, onUpdate, onOpen, onEdit }) {
         if (!cancelled) setLoading(false);
       }
     }
-    load();
+
+    load(true);
+
+    // Actualiza sola cada 10 segundos — asi, si actualizas esta app desde
+    // otra sesion/dispositivo, esta tarjeta refleja el cambio (estado,
+    // ultimo commit) sin que nadie tenga que recargar la pagina.
+    const interval = setInterval(() => load(false), 10000);
+
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, [app]);
 

@@ -61,7 +61,23 @@ gratuito) — creas la base ahí, copias su cadena de conexión, y la pegas
 como la variable de entorno `DATABASE_URL` en Vercel. El paso de correr
 `schema.sql` es el mismo (ambos tienen un editor SQL en su panel).
 
-### 2. Crear credenciales de Google OAuth
+### 2. Almacenamiento Vercel Blob (para zips grandes)
+
+Los archivos `.zip` que subes ya **no pasan por la función serverless**
+(esa vía tiene un límite fijo de Vercel de 4.5MB por solicitud, imposible
+de aumentar). Ahora se suben directo desde el navegador a **Vercel Blob**,
+sin ese límite práctico.
+
+1. En tu proyecto en Vercel → pestaña **Storage** → **Create Database** →
+   **Blob**.
+2. Dale un nombre y crea. Vercel conecta una variable de entorno sola —
+   revisa en **Settings → Environment Variables** que se llame exactamente
+   `UPLOADS_READ_WRITE_TOKEN`. Si Vercel le puso otro nombre (le pasa según
+   el nombre que le des al Blob Store), renómbrala a esa exacta o agrega
+   una nueva variable con ese nombre copiando el mismo valor — el código
+   busca ese nombre puntual, no acepta variantes.
+
+### 3. Crear credenciales de Google OAuth
 
 1. Ve a [Google Cloud Console](https://console.cloud.google.com/) → crea un
    proyecto nuevo (o usa uno existente).
@@ -75,14 +91,14 @@ como la variable de entorno `DATABASE_URL` en Vercel. El paso de correr
    `https://<tu-dominio-de-vercel>/api/auth/google/callback`
 5. Copia el **Client ID** y el **Client Secret**.
 
-### 3. Crear (o reutilizar) la OAuth App de GitHub
+### 4. Crear (o reutilizar) la OAuth App de GitHub
 
 Si ya la creaste antes, revisa que su **Authorization callback URL** siga
 siendo `https://<tu-dominio-de-vercel>/api/auth/github/callback`. Si no la
 tienes, mismo proceso de siempre: GitHub → Settings → Developer settings →
 OAuth Apps → New OAuth App.
 
-### 4. Variables de entorno en Vercel
+### 5. Variables de entorno en Vercel
 
 Project Settings → Environment Variables:
 
@@ -92,13 +108,14 @@ Project Settings → Environment Variables:
   Supabase/Neon, pégala tú)
 - `SESSION_SECRET` — cualquier cadena larga y aleatoria (por ejemplo,
   generá una en https://generate-secret.vercel.app/32)
+- `UPLOADS_READ_WRITE_TOKEN` (paso 2, ya puesta sola si usaste Vercel Blob)
 
-### 5. Redeploy
+### 6. Redeploy
 
 Sube este código a tu repo y espera el redeploy (o dispáralo manualmente
 desde Vercel) para que tome las variables nuevas.
 
-### 6. Usarlo
+### 7. Usarlo
 
 1. Abre tu URL → **Continuar con Google**.
 2. Vas a ver un aviso para **vincular GitHub** — hazlo una sola vez.

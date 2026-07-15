@@ -1,12 +1,27 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 import { X, UploadCloud, FileArchive, CheckCircle2, XCircle } from "lucide-react";
 import { useToast } from "./Toasts";
 
-async function streamRequest(url, formData, onEvent) {
-  const res = await fetch(url, { method: "POST", body: formData });
+async function streamRequest(url, body, onEvent) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!res.body) throw new Error("Sin respuesta del servidor");
+
+  const contentType = res.headers.get("content-type") || "";
+  if (!res.ok && !contentType.includes("text/plain")) {
+    // Respuesta de error que no es nuestro stream NDJSON (por ejemplo un
+    // 413 o 500 crudo de la plataforma) — se lee como texto, nunca se
+    // intenta parsear como JSON linea por linea.
+    const text = await res.text();
+    throw new Error(text.slice(0, 200) || `Error del servidor (status ${res.status})`);
+  }
+
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -21,7 +36,12 @@ async function streamRequest(url, formData, onEvent) {
     buffer = lines.pop();
     for (const line of lines) {
       if (!line.trim()) continue;
-      const evt = JSON.parse(line);
+      let evt;
+      try {
+        evt = JSON.parse(line);
+      } catch {
+        continue; // linea no-JSON inesperada — se ignora en vez de tumbar todo
+      }
       onEvent(evt);
       if (evt.type === "done") lastDone = evt;
       if (evt.type === "error") lastError = evt;
@@ -54,17 +74,24 @@ export default function DeployModal({ app, onClose }) {
     setResult(null);
 
     const toastId = push({ type: "loading", title: "Subiendo...", description: app.name });
+    let zipUrl = null;
 
     try {
+      // 0. Subir el zip directo a Vercel Blob desde el navegador — nunca
+      // pasa por nuestra funcion, asi que no hay limite de 4.5MB.
+      appendLog(`Subiendo ${file.name}...`);
+      const blob = await upload(`${app.id}-${Date.now()}.zip`, file, {
+        access: "public",
+        handleUploadUrl: "/api/blob/upload",
+      });
+      zipUrl = blob.url;
+      appendLog("Archivo recibido, procesando...", "ok");
+
       // 1. GitHub — commit atomico + push
       update(toastId, { title: "Creando commit...", description: "Subiendo archivos a GitHub" });
-      const ghForm = new FormData();
-      ghForm.append("zip", file);
-      ghForm.append("message", message);
-
       const ghResult = await streamRequest(
         `/api/github/${app.github.owner}/${app.github.repo}/deploy`,
-        ghForm,
+        { zipUrl, message },
         (evt) => {
           if (evt.type === "status") appendLog(evt.message);
           if (evt.type === "progress" && evt.stage === "blobs" && evt.path) {
@@ -88,20 +115,20 @@ export default function DeployModal({ app, onClose }) {
         appendLog("Vercel esta conectado por Git — se desplegara automaticamente con el push.", "ok");
       }
 
-      // 3. Hostinger — subida FTP directa del mismo zip
+      // 3. Hostinger — subida FTP directa del mismo zip (misma URL de Blob)
       if (app.hostinger?.enabled) {
         update(toastId, { title: "Publicando...", description: "Subiendo a Hostinger por FTP" });
         appendLog(`Conectando a ${app.hostinger.host}...`);
-        const ftpForm = new FormData();
-        ftpForm.append("zip", file);
-        ftpForm.append("protocol", app.hostinger.protocol);
-        ftpForm.append("host", app.hostinger.host);
-        if (app.hostinger.port) ftpForm.append("port", String(app.hostinger.port));
-        ftpForm.append("username", app.hostinger.username);
-        ftpForm.append("password", app.hostinger.password);
-        ftpForm.append("remotePath", app.hostinger.remotePath);
 
-        await streamRequest("/api/hostinger/deploy", ftpForm, (evt) => {
+        await streamRequest("/api/hostinger/deploy", {
+          zipUrl,
+          protocol: app.hostinger.protocol,
+          host: app.hostinger.host,
+          port: app.hostinger.port,
+          username: app.hostinger.username,
+          password: app.hostinger.password,
+          remotePath: app.hostinger.remotePath,
+        }, (evt) => {
           if (evt.type === "status") appendLog(evt.message);
           if (evt.type === "progress") appendLog(`[${evt.index}/${evt.total}] ${evt.path}`, "progress");
         });
@@ -127,6 +154,13 @@ export default function DeployModal({ app, onClose }) {
       update(toastId, { type: "error", title: "Error al publicar", description: err.message });
     } finally {
       setRunning(false);
+      if (zipUrl) {
+        fetch("/api/blob/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ zipUrl }),
+        }).catch(() => {});
+      }
     }
   };
 
@@ -178,7 +212,7 @@ export default function DeployModal({ app, onClose }) {
                   <>
                     <UploadCloud size={24} className="mx-auto mb-2 text-muted" />
                     <p className="text-[13px] font-medium">Arrastra tu .zip o toca para elegirlo</p>
-                    <p className="text-[11px] text-muted mt-1">node_modules, .next y .git se ignoran automaticamente</p>
+                    <p className="text-[11px] text-muted mt-1">Sin límite práctico de tamaño — node_modules, .next y .git se ignoran automáticamente</p>
                   </>
                 )}
               </div>

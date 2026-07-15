@@ -31,6 +31,7 @@ export async function GET(request) {
       `UPDATE users SET github_token = $1, github_login = $2, github_avatar_url = $3 WHERE id = $4`,
       [token, viewer.login, viewer.avatar_url, session.userId]
     );
+    console.log(`[auth/github] vinculado — userId=${session.userId} github_login=${viewer.login}`);
 
     const res = NextResponse.redirect(new URL("/dashboard", request.url));
     res.cookies.set("crisbofiles_oauth_state", "", { path: "/", maxAge: 0 });

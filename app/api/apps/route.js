@@ -28,6 +28,7 @@ export async function GET() {
     "SELECT * FROM apps WHERE user_id = $1 ORDER BY updated_at DESC",
     [session.userId]
   );
+  console.log(`[apps] GET — userId=${session.userId} apps=${rows.length}`);
   return NextResponse.json({ apps: rows.map(rowToApp) });
 }
 

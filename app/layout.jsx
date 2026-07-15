@@ -3,10 +3,20 @@ import "./globals.css";
 export const metadata = {
   title: "crisbofiles — Centro de control de despliegues",
   description: "Administra, actualiza y despliega tus aplicaciones desde una sola interfaz.",
+  manifest: "/manifest.webmanifest",
   icons: {
     icon: "/logo.png",
-    apple: "/logo.png",
+    apple: "/apple-icon.png",
   },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "crisbofiles",
+  },
+};
+
+export const viewport = {
+  themeColor: "#0a0a0b",
 };
 
 export default function RootLayout({ children }) {
