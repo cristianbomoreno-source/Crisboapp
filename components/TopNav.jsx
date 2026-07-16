@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { LogOut, Github, CheckCircle2, ChevronDown, Mail } from "lucide-react";
+import { LogOut, Github, CheckCircle2, ChevronDown, Mail, KeyRound } from "lucide-react";
 
 export default function TopNav({ user }) {
   const [open, setOpen] = useState(false);
@@ -64,6 +64,14 @@ export default function TopNav({ user }) {
                     </a>
                   )}
                 </div>
+
+                <a
+                  href="/dashboard/tokens"
+                  className="flex items-center gap-2 px-4 py-3 text-[12.5px] hover:bg-panel2 transition-colors border-b border-border"
+                >
+                  <KeyRound size={14} className="text-muted" />
+                  Tokens para Claude
+                </a>
 
                 <form action="/api/auth/logout" method="POST">
                   <button

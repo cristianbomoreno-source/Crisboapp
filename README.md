@@ -124,25 +124,94 @@ desde Vercel) para que tome las variables nuevas.
    vea el favicon real en la tarjeta).
 4. **Actualizar** cuando quieras publicar cambios.
 
+## Conector MCP (usar crisbofiles directo desde Claude)
+
+Ademas del boton "Actualizar" de siempre (que sigue funcionando exactamente
+igual), ahora crisbofiles expone un conector MCP para que Claude pueda
+desplegar directamente, sin que tengas que bajar y subir el zip a mano.
+
+### Migracion de base de datos (una sola vez)
+
+Vuelve a correr el `schema.sql` completo contra tu base de datos (es seguro,
+usa `CREATE TABLE IF NOT EXISTS` — no borra nada existente). Esto agrega la
+tabla `api_tokens` que falta.
+
+### Generar un token
+
+1. Abre crisbofiles → menu de tu cuenta (arriba a la derecha) → **Tokens
+   para Claude**.
+2. **Generar token** → copialo de inmediato (solo se muestra una vez;
+   despues solo se ve el prefijo, para identificarlo).
+3. En esa misma pantalla ves la **URL del conector** (`.../api/mcp`).
+
+### Conectarlo en Claude
+
+Claude → Configuración → Conectores → **Agregar conector personalizado**.
+
+La forma que funciona **hoy, para cualquier cuenta**: pega la URL con el
+token incluido como query param (la pantalla de Tokens te la arma lista
+para copiar): `https://tu-app.vercel.app/api/mcp?token=TU_TOKEN`.
+
+Alternativa (si tu cuenta ya tiene habilitada la beta de "Request headers"
+en ese dialogo — Anthropic la esta desplegando gradualmente): pega la URL
+sin `?token=` y agrega un header `Authorization: Bearer TU_TOKEN` ahi. El
+endpoint acepta ambas formas indistintamente.
+
+Nota: agregar conectores personalizados requiere plan Pro/Max/Team/Enterprise
+de Claude (no esta disponible en el plan gratuito).
+
+A partir de ahi, en cualquier chat, Claude puede:
+
+- `list_apps` — ver tus apps conectadas.
+- `preview_deploy` — revisar que se subiria (framework, cantidad de
+  archivos, archivos con posibles credenciales que se omitirian) **sin
+  cambiar nada todavia**.
+- `deploy` — reemplazar el repo en un solo commit. Requiere `confirm:true`,
+  que Claude solo debe enviar despues de que tu confirmes explicitamente en
+  el chat el resultado de `preview_deploy`.
+- `list_recent_commits` / `restore_deploy` — ver historial y volver a una
+  version anterior (tambien pide confirmacion).
+
+### Seguridad
+
+- Los tokens son independientes de tu sesion de Google: se generan/revocan
+  desde el dashboard y **solo** sirven para llamar `/api/mcp` — no dan
+  acceso a iniciar sesion normal en la app.
+- Revocar un token lo invalida de inmediato (se guarda su hash, nunca el
+  valor real, igual que una contraseña).
+- El filtro de archivos con credenciales (`.env*`, llaves `.pem`, `id_rsa`,
+  etc.) de `lib/zip.js` aplica igual para el conector MCP que para el
+  boton "Actualizar" manual — nunca se suben, sin importar el origen del
+  zip.
+- El limite practico de tamano para `deploy`/`preview_deploy` via MCP es de
+  ~3MB de zip (el body de una funcion serverless de Vercel tiene un tope
+  fijo). Proyectos mas grandes: sigue usando el boton "Actualizar" normal
+  (ese sube a Vercel Blob, sin ese limite).
+
 ## Arquitectura
 
 ```
 lib/
   db.js         -> Pool de Postgres (creado de forma perezosa)
   session.js     -> cookie firmada (HMAC) con solo el userId + lookup en DB
-  google.js       -> OAuth de Google (login principal)
-  github.js        -> OAuth de GitHub (vinculo), repos, commit atomico, historial, restore
-  vercel.js          -> proyectos, deployments, dominios, deploy hooks
-  hostinger.js         -> FTP/FTPS/SFTP, con limpieza de la carpeta remota antes de subir
-  zip.js                -> extraccion, filtrado, validacion, deteccion de framework
-  dns.js                 -> verificacion de DNS/SSL
-  providers.js             -> registro de proveedores disponibles/futuros
+  users.js        -> lookup de usuario por id (para rutas autenticadas por token, no cookie)
+  apiTokens.js      -> generar/listar/revocar/validar tokens del conector MCP
+  mcpTools.js        -> herramientas MCP (list_apps, preview_deploy, deploy, etc.) sobre lib/github.js
+  google.js            -> OAuth de Google (login principal)
+  github.js             -> OAuth de GitHub (vinculo), repos, commit atomico, historial, restore
+  vercel.js               -> proyectos, deployments, dominios, deploy hooks
+  hostinger.js              -> FTP/FTPS/SFTP, con limpieza de la carpeta remota antes de subir
+  zip.js                    -> extraccion, filtrado (incluye archivos con credenciales), validacion, deteccion de framework
+  dns.js                     -> verificacion de DNS/SSL
+  providers.js                 -> registro de proveedores disponibles/futuros
 app/api/
   auth/google/(callback)     -> login principal
   auth/github/(callback)      -> vincular GitHub a la cuenta ya iniciada
   auth/logout
   me                           -> perfil de la sesion actual
   apps, apps/[id]                -> CRUD de aplicaciones en la base de datos
+  tokens, tokens/[id]              -> generar/listar/revocar tokens del conector MCP
+  mcp                                -> endpoint del conector MCP (JSON-RPC, autenticado por token)
   repos                           -> listar repos de GitHub del usuario
   github/[owner]/[repo]/...         -> commits, restore, deploy (commit atomico)
   vercel/..., hostinger/deploy, domain/check

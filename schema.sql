@@ -30,3 +30,20 @@ CREATE TABLE IF NOT EXISTS apps (
 );
 
 CREATE INDEX IF NOT EXISTS idx_apps_user_id ON apps(user_id);
+
+-- Tokens de API para el conector MCP (Claude). Son independientes de la
+-- sesion de Google: se generan/revocan desde el dashboard y solo sirven
+-- para llamar /api/mcp, nunca para iniciar sesion normal en la app.
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  token_prefix TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
