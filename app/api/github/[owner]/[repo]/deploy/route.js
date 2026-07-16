@@ -45,6 +45,16 @@ export async function POST(req, { params }) {
         const arrayBuffer = await zipRes.arrayBuffer();
         const files = await extractZip(arrayBuffer);
 
+        if (files.skippedSensitive?.length) {
+          send({
+            type: "status",
+            stage: "validating",
+            message:
+              `Se omitieron ${files.skippedSensitive.length} archivo(s) con posibles credenciales ` +
+              `(${files.skippedSensitive.join(", ")}) — nunca se suben a GitHub.`,
+          });
+        }
+
         const validation = validateProject(files);
         if (!validation.valid) {
           send({ type: "error", message: validation.errors.join(" ") });
