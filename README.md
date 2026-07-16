@@ -134,7 +134,8 @@ desplegar directamente, sin que tengas que bajar y subir el zip a mano.
 
 Vuelve a correr el `schema.sql` completo contra tu base de datos (es seguro,
 usa `CREATE TABLE IF NOT EXISTS` — no borra nada existente). Esto agrega la
-tabla `api_tokens` que falta.
+tabla `api_tokens`, y `deploy_sessions`/`deploy_session_files` (para la
+subida incremental de proyectos grandes).
 
 ### Generar un token
 
@@ -171,6 +172,11 @@ A partir de ahi, en cualquier chat, Claude puede:
   el chat el resultado de `preview_deploy`.
 - `list_recent_commits` / `restore_deploy` — ver historial y volver a una
   version anterior (tambien pide confirmacion).
+- `start_deploy` / `add_files` / `get_deploy_session_status` / `finish_deploy`
+  / `cancel_deploy` — subida incremental para proyectos grandes (muchos
+  archivos): en vez de mandar el zip completo en una sola llamada, Claude
+  abre una sesion, agrega los archivos de a lotes chicos, y cierra con un
+  solo commit atomico al final (tambien pide confirmacion).
 
 ### Seguridad
 

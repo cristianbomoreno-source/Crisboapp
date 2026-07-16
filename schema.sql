@@ -47,3 +47,27 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+
+-- Sesiones de despliegue incremental (conector MCP): permiten que Claude
+-- suba un proyecto grande en varios lotes chicos de archivos (start_deploy
+-- -> add_files x N -> finish_deploy) en vez de mandar el zip completo en
+-- una sola llamada. Cada fila de deploy_session_files es un blob de GitHub
+-- YA creado, esperando a que finish_deploy arme el arbol/commit final.
+CREATE TABLE IF NOT EXISTS deploy_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  app_id TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+  message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS deploy_session_files (
+  id SERIAL PRIMARY KEY,
+  session_id UUID NOT NULL REFERENCES deploy_sessions(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  blob_sha TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_deploy_sessions_user_id ON deploy_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_deploy_session_files_session ON deploy_session_files(session_id);
