@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { X, UploadCloud, FileArchive, CheckCircle2, XCircle } from "lucide-react";
+import { X, UploadCloud, FileArchive, CheckCircle2, XCircle, Clock } from "lucide-react";
 import { useToast } from "./Toasts";
 
 async function streamRequest(url, body, onEvent) {
@@ -51,6 +51,43 @@ async function streamRequest(url, body, onEvent) {
   return lastDone;
 }
 
+// ---------- Progreso guardado en el navegador ----------
+// Permite retomar una subida a GitHub sin repetir archivos ya enviados si
+// la pagina se recarga o el intento anterior fallo a mitad de camino.
+//
+// Ademas de la verificacion de hash en el servidor (que es la proteccion
+// real contra reusar contenido viejo), el progreso guardado expira solo a
+// las 2 horas — asi nunca queda un resto de un intento muy anterior dando
+// vueltas indefinidamente en el navegador.
+const PROGRESS_TTL_MS = 2 * 60 * 60 * 1000;
+
+function progressKey(app) {
+  return `crisbofiles_progress_${app.github.owner}_${app.github.repo}`;
+}
+function loadProgress(app) {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(progressKey(app)) || "null");
+    if (!raw || !raw.savedAt || Date.now() - raw.savedAt > PROGRESS_TTL_MS) return {};
+    return raw.files || {};
+  } catch {
+    return {};
+  }
+}
+function saveProgress(app, map) {
+  try {
+    window.localStorage.setItem(progressKey(app), JSON.stringify({ savedAt: Date.now(), files: map }));
+  } catch {
+    // localStorage lleno o no disponible — no es critico, se sigue sin guardar
+  }
+}
+function clearProgress(app) {
+  try {
+    window.localStorage.removeItem(progressKey(app));
+  } catch {
+    // no critico
+  }
+}
+
 export default function DeployModal({ app, onClose }) {
   const { push, update } = useToast();
   const [file, setFile] = useState(null);
@@ -59,7 +96,18 @@ export default function DeployModal({ app, onClose }) {
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState([]);
   const [result, setResult] = useState(null); // { ok, message, commitUrl }
+  const [fileProgress, setFileProgress] = useState({ current: "", processed: 0, total: 0 });
+  const [rateLimitNotice, setRateLimitNotice] = useState(null);
+  const [resumeInfo, setResumeInfo] = useState(0);
   const inputRef = useRef(null);
+  const progressRef = useRef({});
+
+  useEffect(() => {
+    const saved = loadProgress(app);
+    const count = Object.keys(saved).length;
+    progressRef.current = saved;
+    setResumeInfo(count);
+  }, [app]);
 
   const appendLog = (text, kind = "info") => setLog((prev) => [...prev, { text, kind }]);
 
@@ -68,10 +116,17 @@ export default function DeployModal({ app, onClose }) {
   };
 
   const runDeploy = async () => {
-    if (!file) return;
+    if (!file || running) return; // el botón ya se deshabilita, esto es un cinturón extra
     setRunning(true);
     setLog([]);
     setResult(null);
+    setRateLimitNotice(null);
+
+    const resumeBlobs = progressRef.current;
+    const resumedCount = Object.keys(resumeBlobs).length;
+    if (resumedCount > 0) {
+      appendLog(`Retomando progreso guardado: ${resumedCount} archivo(s) ya subidos anteriormente.`, "ok");
+    }
 
     const toastId = push({ type: "loading", title: "Subiendo...", description: app.name });
     let zipUrl = null;
@@ -87,19 +142,44 @@ export default function DeployModal({ app, onClose }) {
       zipUrl = blob.url;
       appendLog("Archivo recibido, procesando...", "ok");
 
-      // 1. GitHub — commit atomico + push
+      // 1. GitHub — commit atomico + push (en serie, con pausas y
+      // reintentos del lado del servidor si GitHub limita las solicitudes)
       update(toastId, { title: "Creando commit...", description: "Subiendo archivos a GitHub" });
       const ghResult = await streamRequest(
         `/api/github/${app.github.owner}/${app.github.repo}/deploy`,
-        { zipUrl, message },
+        { zipUrl, message, resumeBlobs },
         (evt) => {
-          if (evt.type === "status") appendLog(evt.message);
+          if (evt.type === "status" && evt.stage === "rate-limited") {
+            setRateLimitNotice(evt.message);
+            appendLog(evt.message, "warn");
+            return;
+          }
+          if (evt.type === "status") {
+            setRateLimitNotice(null);
+            appendLog(evt.message);
+          }
           if (evt.type === "progress" && evt.stage === "blobs" && evt.path) {
-            appendLog(`[${evt.index}/${evt.total}] ${evt.path}`, "progress");
+            setRateLimitNotice(null);
+            setFileProgress({ current: evt.path, processed: evt.index, total: evt.total });
+
+            // Persistimos el sha de este archivo ya subido — si la pagina
+            // se recarga a mitad de camino, el proximo intento lo salta.
+            if (evt.sha) {
+              progressRef.current = { ...progressRef.current, [evt.path]: evt.sha };
+              saveProgress(app, progressRef.current);
+            }
+
+            const tag = evt.unchanged ? "sin cambios" : evt.resumed ? "retomado" : "subido";
+            appendLog(`[${evt.index}/${evt.total}] ${evt.path} (${tag})`, "progress");
           }
         }
       );
       appendLog("Commit y push completados.", "ok");
+
+      // Deploy exitoso — ya no hace falta el progreso guardado.
+      clearProgress(app);
+      progressRef.current = {};
+      setResumeInfo(0);
 
       // 2. Vercel — deploy hook si esta configurado
       if (app.vercel?.enabled && app.vercel.deployHookUrl) {
@@ -135,7 +215,25 @@ export default function DeployModal({ app, onClose }) {
         appendLog("Subida a Hostinger completada.", "ok");
       }
 
-      setResult({ ok: true, message: "Deployment exitoso.", commitUrl: ghResult?.commitUrl });
+      if (ghResult?.noChanges) {
+        appendLog("Sin cambios respecto al repositorio — no se creo ningun commit.", "ok");
+      } else {
+        const s = ghResult?.stats;
+        if (s) {
+          appendLog(
+            `Resumen: ${s.added} nuevo(s), ${s.modified} modificado(s), ${s.deleted} eliminado(s), ${s.unchanged} sin cambios.`,
+            "ok"
+          );
+        }
+      }
+
+      setResult({
+        ok: true,
+        noChanges: !!ghResult?.noChanges,
+        message: ghResult?.noChanges ? "Sin cambios — no se creo ningun commit." : "Actualizacion completada.",
+        commitUrl: ghResult?.commitUrl,
+        stats: ghResult?.stats,
+      });
       if (ghResult?.framework && ghResult.framework !== app.framework) {
         fetch("/api/apps", {
           method: "POST",
@@ -145,15 +243,20 @@ export default function DeployModal({ app, onClose }) {
       }
       update(toastId, {
         type: "success",
-        title: "Deployment exitoso",
-        description: `${app.name} se actualizo correctamente`,
+        title: ghResult?.noChanges ? "Sin cambios" : "Actualizacion completada",
+        description: ghResult?.noChanges
+          ? `${app.name} ya estaba al dia`
+          : `${app.name} se actualizo correctamente`,
       });
     } catch (err) {
+      // No se borra el progreso guardado — el proximo intento retoma desde
+      // el ultimo archivo pendiente en vez de volver a empezar de cero.
       appendLog(`Error: ${err.message}`, "error");
       setResult({ ok: false, message: err.message });
       update(toastId, { type: "error", title: "Error al publicar", description: err.message });
     } finally {
       setRunning(false);
+      setRateLimitNotice(null);
       if (zipUrl) {
         fetch("/api/blob/delete", {
           method: "POST",
@@ -163,6 +266,8 @@ export default function DeployModal({ app, onClose }) {
       }
     }
   };
+
+  const pending = fileProgress.total ? fileProgress.total - fileProgress.processed : 0;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
@@ -191,16 +296,17 @@ export default function DeployModal({ app, onClose }) {
                   setDragging(false);
                   handleFile(e.dataTransfer.files?.[0]);
                 }}
-                onClick={() => inputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl2 px-5 py-8 text-center cursor-pointer transition-colors ${
-                  dragging ? "border-accent bg-accent-soft" : "border-border bg-panel2"
-                }`}
+                onClick={() => !running && inputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl2 px-5 py-8 text-center transition-colors ${
+                  running ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                } ${dragging ? "border-accent bg-accent-soft" : "border-border bg-panel2"}`}
               >
                 <input
                   ref={inputRef}
                   type="file"
                   accept=".zip"
                   className="hidden"
+                  disabled={running}
                   onChange={(e) => handleFile(e.target.files?.[0])}
                 />
                 {file ? (
@@ -217,6 +323,13 @@ export default function DeployModal({ app, onClose }) {
                 )}
               </div>
 
+              {resumeInfo > 0 && !running && (
+                <div className="flex items-center gap-2 text-[11.5px] text-amber-400 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2.5">
+                  <Clock size={13} className="flex-shrink-0" />
+                  Hay un progreso guardado de un intento anterior ({resumeInfo} archivo(s)) — se retomará automáticamente al publicar.
+                </div>
+              )}
+
               <div>
                 <label className="block text-[11px] uppercase tracking-wide text-muted mb-1.5">
                   Mensaje del commit
@@ -224,16 +337,53 @@ export default function DeployModal({ app, onClose }) {
                 <input
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
-                  className="w-full bg-panel2 border border-border rounded-lg px-3 py-2.5 text-[13px] outline-none focus:border-accent"
+                  disabled={running}
+                  className="w-full bg-panel2 border border-border rounded-lg px-3 py-2.5 text-[13px] outline-none focus:border-accent disabled:opacity-60"
                 />
               </div>
             </>
           )}
 
+          {running && fileProgress.total > 0 && (
+            <div className="bg-panel2 border border-border rounded-lg px-3.5 py-3">
+              <div className="flex items-center justify-between text-[11.5px] mb-1.5">
+                <span className="text-muted">Procesando archivo</span>
+                <span className="font-medium">
+                  {fileProgress.processed}/{fileProgress.total} — {pending} pendiente{pending === 1 ? "" : "s"}
+                </span>
+              </div>
+              <p className="text-[12px] font-mono truncate mb-2">{fileProgress.current}</p>
+              <div className="h-1.5 bg-border rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-accent transition-all duration-300"
+                  style={{ width: `${(fileProgress.processed / fileProgress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {rateLimitNotice && (
+            <div className="flex items-center gap-2 text-[12px] text-amber-400 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2.5">
+              <Clock size={14} className="flex-shrink-0 animate-pulse-soft" />
+              {rateLimitNotice}
+            </div>
+          )}
+
           {log.length > 0 && (
             <div className="bg-[#0e0e10] border border-border rounded-lg px-3 py-3 font-mono text-[11px] text-muted max-h-48 overflow-y-auto scrollbar-thin leading-relaxed">
               {log.map((l, i) => (
-                <div key={i} className={l.kind === "ok" ? "text-emerald-400" : l.kind === "error" ? "text-red-400" : ""}>
+                <div
+                  key={i}
+                  className={
+                    l.kind === "ok"
+                      ? "text-emerald-400"
+                      : l.kind === "error"
+                      ? "text-red-400"
+                      : l.kind === "warn"
+                      ? "text-amber-400"
+                      : ""
+                  }
+                >
                   {l.text}
                 </div>
               ))}
@@ -255,6 +405,18 @@ export default function DeployModal({ app, onClose }) {
               )}
               <div>
                 <p className="font-medium">{result.message}</p>
+                {result.stats && !result.noChanges && (
+                  <p className="text-[12px] text-muted mt-1">
+                    {result.stats.added} nuevo(s) · {result.stats.modified} modificado(s) ·{" "}
+                    {result.stats.deleted} eliminado(s)
+                    {result.stats.unchanged > 0 ? ` · ${result.stats.unchanged} sin cambios` : ""}
+                  </p>
+                )}
+                {!result.ok && (
+                  <p className="text-[11.5px] text-muted mt-1">
+                    El progreso quedó guardado — al reintentar, los archivos ya subidos no se vuelven a enviar.
+                  </p>
+                )}
                 {result.commitUrl && (
                   <a
                     href={result.commitUrl}
