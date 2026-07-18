@@ -39,6 +39,34 @@ export default function TopNav({ user }) {
           <span className="font-semibold text-[15px] tracking-tight">crisbofiles</span>
         </div>
 
+        <div className="flex items-center gap-1.5">
+          {user?.githubConnected && (
+            <div className="flex items-center gap-1 bg-panel2 border border-border rounded-lg pl-2 pr-1 py-1">
+              <CheckCircle2 size={12} className="text-emerald-400 flex-shrink-0" />
+              <span className="text-[11px] text-muted max-w-[70px] truncate">
+                @{user.githubLogin}
+              </span>
+              <button
+                onClick={handleDisconnectGithub}
+                disabled={disconnecting}
+                title="Cerrar sesión de GitHub"
+                className="flex items-center gap-1 text-[10.5px] text-muted hover:text-red-400 transition-colors px-1.5 py-0.5 rounded disabled:opacity-50"
+              >
+                <Unlink size={11} />
+                <span className="hidden sm:inline">{disconnecting ? "..." : "Cerrar sesión"}</span>
+              </button>
+            </div>
+          )}
+          {user && !user.githubConnected && (
+            <a
+              href="/api/auth/github"
+              className="flex items-center gap-1.5 bg-white text-black text-[11px] font-semibold rounded-lg px-2 py-1.5"
+            >
+              <Github size={12} />
+              <span>Vincular GitHub</span>
+            </a>
+          )}
+
         {user && (
           <div className="relative" ref={menuRef}>
             <button
@@ -64,33 +92,6 @@ export default function TopNav({ user }) {
                   </p>
                 </div>
 
-                <div className="px-4 py-3.5 border-b border-border">
-                  {user.githubConnected ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 text-[12.5px] text-emerald-400 min-w-0">
-                        <CheckCircle2 size={14} className="flex-shrink-0" />
-                        <span className="truncate">GitHub: @{user.githubLogin}</span>
-                      </div>
-                      <button
-                        onClick={handleDisconnectGithub}
-                        disabled={disconnecting}
-                        className="flex items-center gap-1 text-[11.5px] text-muted hover:text-red-400 transition-colors flex-shrink-0 disabled:opacity-50"
-                      >
-                        <Unlink size={12} />
-                        {disconnecting ? "Cerrando..." : "Cerrar sesión"}
-                      </button>
-                    </div>
-                  ) : (
-                    <a
-                      href="/api/auth/github"
-                      className="flex items-center justify-center gap-2 bg-white text-black text-[12.5px] font-semibold rounded-lg py-2.5"
-                    >
-                      <Github size={14} />
-                      Vincular GitHub
-                    </a>
-                  )}
-                </div>
-
                 <a
                   href="/dashboard/tokens"
                   className="flex items-center gap-2 px-4 py-3 text-[12.5px] hover:bg-panel2 transition-colors border-b border-border"
@@ -112,6 +113,7 @@ export default function TopNav({ user }) {
             )}
           </div>
         )}
+        </div>
       </div>
     </header>
   );
