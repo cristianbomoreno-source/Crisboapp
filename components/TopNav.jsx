@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { LogOut, Github, CheckCircle2, ChevronDown, Mail, KeyRound } from "lucide-react";
+import { LogOut, Github, CheckCircle2, ChevronDown, Mail, KeyRound, Unlink } from "lucide-react";
 
 export default function TopNav({ user }) {
   const [open, setOpen] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -14,6 +15,21 @@ export default function TopNav({ user }) {
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
+
+  const handleDisconnectGithub = async () => {
+    if (disconnecting) return;
+    const confirmed = window.confirm(
+      "¿Desconectar GitHub de tu cuenta? Vas a tener que volver a vincularlo para poder actualizar tus apps."
+    );
+    if (!confirmed) return;
+
+    setDisconnecting(true);
+    try {
+      await fetch("/api/auth/github/disconnect", { method: "POST" });
+    } finally {
+      window.location.reload();
+    }
+  };
 
   return (
     <header className="sticky top-0 z-40 bg-bg/90 backdrop-blur-md border-b border-border">
@@ -50,9 +66,19 @@ export default function TopNav({ user }) {
 
                 <div className="px-4 py-3.5 border-b border-border">
                   {user.githubConnected ? (
-                    <div className="flex items-center gap-2 text-[12.5px] text-emerald-400">
-                      <CheckCircle2 size={14} className="flex-shrink-0" />
-                      <span className="truncate">GitHub conectado: @{user.githubLogin}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-[12.5px] text-emerald-400 min-w-0">
+                        <CheckCircle2 size={14} className="flex-shrink-0" />
+                        <span className="truncate">GitHub: @{user.githubLogin}</span>
+                      </div>
+                      <button
+                        onClick={handleDisconnectGithub}
+                        disabled={disconnecting}
+                        className="flex items-center gap-1 text-[11.5px] text-muted hover:text-red-400 transition-colors flex-shrink-0 disabled:opacity-50"
+                      >
+                        <Unlink size={12} />
+                        {disconnecting ? "Cerrando..." : "Cerrar sesión"}
+                      </button>
                     </div>
                   ) : (
                     <a

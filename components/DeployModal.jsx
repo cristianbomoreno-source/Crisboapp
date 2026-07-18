@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { X, UploadCloud, FileArchive, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { X, UploadCloud, FileArchive, CheckCircle2, XCircle, Clock, Globe, Loader2 } from "lucide-react";
 import { useToast } from "./Toasts";
 
 async function streamRequest(url, body, onEvent) {
@@ -88,6 +88,43 @@ function clearProgress(app) {
   }
 }
 
+// ---------- Confirmacion real de Vercel ----------
+// Vercel siempre reporta el estado de build/deploy — esto consulta ese
+// estado hasta que la nueva build queda "READY" (o falla), asi el usuario
+// sabe con certeza que la pagina en vivo ya refleja lo que acaba de subir,
+// no solo que el push a GitHub funciono.
+const VERCEL_POLL_INTERVAL_MS = 4000;
+const VERCEL_POLL_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutos
+
+async function pollVercelReady(app, sinceMs, onUpdate) {
+  const q = new URLSearchParams({
+    token: app.vercel.token || "",
+    ...(app.vercel.teamId ? { teamId: app.vercel.teamId } : {}),
+  });
+  const start = Date.now();
+
+  while (Date.now() - start < VERCEL_POLL_TIMEOUT_MS) {
+    let dep = null;
+    try {
+      const res = await fetch(`/api/vercel/projects/${app.vercel.projectId}?${q}`);
+      const data = await res.json();
+      dep = data?.deployment || null;
+    } catch {
+      // fallo de red puntual al consultar — se reintenta en el proximo ciclo
+    }
+
+    if (dep && new Date(dep.createdAt).getTime() >= sinceMs) {
+      if (dep.state === "READY") return { ok: true, url: dep.url };
+      if (dep.state === "ERROR" || dep.state === "CANCELED") {
+        return { ok: false, url: dep.url, state: dep.state };
+      }
+      onUpdate?.(dep.state);
+    }
+    await new Promise((r) => setTimeout(r, VERCEL_POLL_INTERVAL_MS));
+  }
+  return { ok: null, timedOut: true };
+}
+
 export default function DeployModal({ app, onClose }) {
   const { push, update } = useToast();
   const [file, setFile] = useState(null);
@@ -98,6 +135,7 @@ export default function DeployModal({ app, onClose }) {
   const [result, setResult] = useState(null); // { ok, message, commitUrl }
   const [fileProgress, setFileProgress] = useState({ current: "", processed: 0, total: 0 });
   const [rateLimitNotice, setRateLimitNotice] = useState(null);
+  const [vercelCheck, setVercelCheck] = useState(null); // { status: 'checking'|'ready'|'error'|'timeout', url }
   const [resumeInfo, setResumeInfo] = useState(0);
   const inputRef = useRef(null);
   const progressRef = useRef({});
@@ -121,6 +159,7 @@ export default function DeployModal({ app, onClose }) {
     setLog([]);
     setResult(null);
     setRateLimitNotice(null);
+    setVercelCheck(null);
 
     const resumeBlobs = progressRef.current;
     const resumedCount = Object.keys(resumeBlobs).length;
@@ -193,6 +232,33 @@ export default function DeployModal({ app, onClose }) {
         appendLog("Vercel deployment disparado.", "ok");
       } else if (app.vercel?.enabled) {
         appendLog("Vercel esta conectado por Git — se desplegara automaticamente con el push.", "ok");
+      }
+
+      // 2b. Confirmacion real: se consulta el estado del deployment en
+      // Vercel hasta que quede en READY — asi el resultado final no dice
+      // solo "se subio a GitHub" sino "la pagina en vivo ya esta al dia".
+      // Solo tiene sentido si hubo un push real (no en el caso "sin
+      // cambios") y si tenemos token+projectId para poder consultar.
+      if (app.vercel?.enabled && app.vercel.projectId && app.vercel.token && !ghResult?.noChanges) {
+        const since = Date.now() - 5000; // margen de 5s por reloj/latencia
+        setVercelCheck({ status: "checking" });
+        appendLog("Esperando la confirmacion de Vercel (build en curso)...");
+        update(toastId, { title: "Verificando en Vercel...", description: "Esperando a que termine el build" });
+
+        const outcome = await pollVercelReady(app, since, (state) => {
+          appendLog(`Vercel: ${state}...`);
+        });
+
+        if (outcome.ok === true) {
+          setVercelCheck({ status: "ready", url: outcome.url });
+          appendLog("Vercel confirmo: la pagina en vivo ya esta actualizada.", "ok");
+        } else if (outcome.ok === false) {
+          setVercelCheck({ status: "error", url: outcome.url, state: outcome.state });
+          appendLog(`Vercel reporto un error en el build (${outcome.state}). Revisa el panel de Vercel.`, "error");
+        } else {
+          setVercelCheck({ status: "timeout" });
+          appendLog("Vercel esta tardando mas de lo normal en confirmar — revisa el panel para verificar.", "warn");
+        }
       }
 
       // 3. Hostinger — subida FTP directa del mismo zip (misma URL de Blob)
@@ -366,6 +432,44 @@ export default function DeployModal({ app, onClose }) {
             <div className="flex items-center gap-2 text-[12px] text-amber-400 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2.5">
               <Clock size={14} className="flex-shrink-0 animate-pulse-soft" />
               {rateLimitNotice}
+            </div>
+          )}
+
+          {vercelCheck && (
+            <div
+              className={`flex items-center justify-between gap-2 text-[12px] rounded-lg px-3 py-2.5 border ${
+                vercelCheck.status === "ready"
+                  ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/25"
+                  : vercelCheck.status === "error"
+                  ? "text-red-400 bg-red-500/10 border-red-500/25"
+                  : "text-amber-400 bg-amber-500/10 border-amber-500/25"
+              }`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {vercelCheck.status === "checking" && (
+                  <Loader2 size={14} className="flex-shrink-0 animate-spin" />
+                )}
+                {vercelCheck.status === "ready" && <CheckCircle2 size={14} className="flex-shrink-0" />}
+                {vercelCheck.status === "error" && <XCircle size={14} className="flex-shrink-0" />}
+                {vercelCheck.status === "timeout" && <Clock size={14} className="flex-shrink-0" />}
+                <span className="truncate">
+                  {vercelCheck.status === "checking" && "Vercel esta construyendo la nueva version..."}
+                  {vercelCheck.status === "ready" && "Vercel confirmó: la página en vivo ya está actualizada"}
+                  {vercelCheck.status === "error" && `Vercel falló al construir (${vercelCheck.state || "error"})`}
+                  {vercelCheck.status === "timeout" && "Vercel está tardando más de lo normal — revisa el panel"}
+                </span>
+              </div>
+              {vercelCheck.url && (
+                <a
+                  href={`https://${vercelCheck.url}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 flex-shrink-0 underline"
+                >
+                  <Globe size={12} />
+                  Ver sitio
+                </a>
+              )}
             </div>
           )}
 
