@@ -3,7 +3,12 @@ import { extractZip, validateProject, detectFramework, generateReadme } from "@/
 import { getRepo, deployAtomicCommit } from "@/lib/github";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// 60s se queda corto para proyectos con muchos archivos, sobre todo con las
+// pausas de 300-700ms por archivo que exige el limite de GitHub (283
+// archivos = ~1.5min solo en pausas, sin contar la subida en si). 300s es
+// el maximo que soporta un plan Vercel Pro para Serverless Functions; en
+// plan Hobby, Vercel lo recorta a 60s igual sin importar este valor.
+export const maxDuration = 300;
 
 export async function POST(req, { params }) {
   const { owner, repo } = params;

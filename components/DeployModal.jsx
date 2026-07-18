@@ -48,6 +48,16 @@ async function streamRequest(url, body, onEvent) {
     }
   }
   if (lastError) throw new Error(lastError.message);
+  if (!lastDone) {
+    // La conexion termino SIN un evento final de exito ni de error — esto
+    // pasa cuando el servidor se corta a mitad de camino (por ejemplo, se
+    // excedio el tiempo maximo permitido en un proyecto grande). Antes esto
+    // se trataba como si hubiera funcionado; ahora se informa como lo que
+    // es: no hay garantia de que el commit se haya creado.
+    throw new Error(
+      "La conexion se cortó antes de que el servidor confirmara el resultado — probablemente se excedió el tiempo máximo permitido. Verifica en GitHub si el commit se creó; si no, reintenta (los archivos ya subidos no se vuelven a enviar)."
+    );
+  }
   return lastDone;
 }
 
