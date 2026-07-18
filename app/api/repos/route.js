@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { listRepos } from "@/lib/github";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   const session = await getSession();

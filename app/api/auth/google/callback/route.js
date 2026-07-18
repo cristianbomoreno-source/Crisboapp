@@ -4,6 +4,7 @@ import { setSessionCookie } from "@/lib/session";
 import { query } from "@/lib/db";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -32,6 +33,7 @@ export async function GET(request) {
     console.log(`[auth/google] login OK — userId=${userId} email=${profile.email} google_id=${profile.sub}`);
 
     const res = NextResponse.redirect(new URL("/", request.url));
+    res.headers.set("Cache-Control", "no-store, max-age=0");
     setSessionCookie(res, userId);
     res.cookies.set("crisbofiles_oauth_state", "", { path: "/", maxAge: 0 });
     return res;

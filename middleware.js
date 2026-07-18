@@ -5,7 +5,9 @@ export function middleware(req) {
   const isDashboard = req.nextUrl.pathname.startsWith("/dashboard");
 
   if (isDashboard && !hasSession) {
-    return NextResponse.redirect(new URL("/login", req.url));
+    const res = NextResponse.redirect(new URL("/login", req.url));
+    res.headers.set("Cache-Control", "no-store, max-age=0");
+    return res;
   }
   return NextResponse.next();
 }

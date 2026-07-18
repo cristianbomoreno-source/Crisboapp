@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { query } from "@/lib/db";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 function rowToApp(row) {
   return {
