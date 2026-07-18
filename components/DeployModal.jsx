@@ -135,6 +135,100 @@ async function pollVercelReady(app, sinceMs, onUpdate) {
   return { ok: null, timedOut: true };
 }
 
+// ---------- Deploy a GitHub en 3 pasos cortos ----------
+// En vez de una sola solicitud larga (que en el plan gratuito de Vercel se
+// corta a los 60s sin importar cuantos archivos tenga el proyecto), esto
+// arma el deploy en tres llamadas cortas: planificar (sin subir nada),
+// subir en tandas chicas, y cerrar el commit. Ninguna tanda individual se
+// acerca al limite de tiempo, sin importar si el proyecto tiene 10 o 500
+// archivos.
+const BATCH_SIZE = 15;
+
+async function runGithubDeploy({ owner, repo, zipUrl, message, resumeBlobs, onLog, onProgress, onRateLimit, onFileDone }) {
+  onLog("Analizando el proyecto y comparando con el repositorio...");
+  const planRes = await fetch(`/api/github/${owner}/${repo}/deploy/plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ zipUrl, message }),
+  });
+  const plan = await planRes.json().catch(() => ({}));
+  if (!planRes.ok) throw new Error(plan.error || `No se pudo analizar el proyecto (status ${planRes.status}).`);
+
+  if (plan.noChanges) {
+    return { noChanges: true, stats: plan.stats, framework: plan.framework };
+  }
+
+  if (plan.skippedSensitive?.length) {
+    onLog(
+      `Se omitieron ${plan.skippedSensitive.length} archivo(s) con posibles credenciales ` +
+        `(${plan.skippedSensitive.join(", ")}) — nunca se suben a GitHub.`
+    );
+  }
+  onLog(`Proyecto valido — framework detectado: ${plan.framework}`);
+  onLog(
+    `${plan.toUpload.length} archivo(s) por subir, ${plan.unchanged.length} sin cambios, ` +
+      `${plan.deletedCount} eliminado(s).`
+  );
+
+  const allBlobs = [...plan.unchanged];
+  const stillPending = [];
+  for (const path of plan.toUpload) {
+    const resumed = resumeBlobs?.[path];
+    if (resumed) {
+      allBlobs.push({ path, sha: resumed });
+    } else {
+      stillPending.push(path);
+    }
+  }
+
+  const total = plan.toUpload.length;
+  let processed = total - stillPending.length;
+  if (processed > 0) {
+    onLog(`Retomando progreso guardado: ${processed} archivo(s) ya subidos.`, "ok");
+    onProgress({ current: "", processed, total });
+  }
+
+  for (let i = 0; i < stillPending.length; i += BATCH_SIZE) {
+    const batch = stillPending.slice(i, i + BATCH_SIZE);
+    const batchResult = await streamRequest(
+      `/api/github/${owner}/${repo}/deploy/batch`,
+      { zipUrl, branch: plan.branch, paths: batch },
+      (evt) => {
+        if (evt.type === "status" && evt.stage === "rate-limited") {
+          onRateLimit(evt.message);
+          return;
+        }
+        if (evt.type === "status") onLog(evt.message);
+        if (evt.type === "progress" && evt.path) {
+          processed++;
+          onRateLimit(null);
+          onProgress({ current: evt.path, processed, total });
+          onFileDone(evt.path, evt.sha);
+        }
+      }
+    );
+    for (const r of batchResult.results || []) {
+      if (!allBlobs.some((b) => b.path === r.path)) allBlobs.push(r);
+    }
+  }
+
+  onLog("Creando el commit final...");
+  const finishRes = await fetch(`/api/github/${owner}/${repo}/deploy/finish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ branch: plan.branch, blobs: allBlobs, message, stats: plan.stats }),
+  });
+  const finishData = await finishRes.json().catch(() => ({}));
+  if (!finishRes.ok) throw new Error(finishData.error || `No se pudo cerrar el commit (status ${finishRes.status}).`);
+
+  return {
+    commitSha: finishData.commitSha,
+    commitUrl: finishData.commitUrl,
+    stats: finishData.stats || plan.stats,
+    framework: plan.framework,
+  };
+}
+
 export default function DeployModal({ app, onClose }) {
   const { push, update } = useToast();
   const [file, setFile] = useState(null);
@@ -191,39 +285,36 @@ export default function DeployModal({ app, onClose }) {
       zipUrl = blob.url;
       appendLog("Archivo recibido, procesando...", "ok");
 
-      // 1. GitHub — commit atomico + push (en serie, con pausas y
-      // reintentos del lado del servidor si GitHub limita las solicitudes)
+      // 1. GitHub — en 3 pasos cortos (plan, tandas de subida, cierre del
+      // commit) para no acercarse nunca al limite de 60s de Vercel, sin
+      // importar cuantos archivos tenga el proyecto.
       update(toastId, { title: "Creando commit...", description: "Subiendo archivos a GitHub" });
-      const ghResult = await streamRequest(
-        `/api/github/${app.github.owner}/${app.github.repo}/deploy`,
-        { zipUrl, message, resumeBlobs },
-        (evt) => {
-          if (evt.type === "status" && evt.stage === "rate-limited") {
-            setRateLimitNotice(evt.message);
-            appendLog(evt.message, "warn");
-            return;
-          }
-          if (evt.type === "status") {
+      const ghResult = await runGithubDeploy({
+        owner: app.github.owner,
+        repo: app.github.repo,
+        zipUrl,
+        message,
+        resumeBlobs,
+        onLog: (msg, kind) => appendLog(msg, kind),
+        onProgress: ({ current, processed, total }) => {
+          setRateLimitNotice(null);
+          setFileProgress({ current, processed, total });
+        },
+        onRateLimit: (msg) => {
+          if (msg) {
+            setRateLimitNotice(msg);
+            appendLog(msg, "warn");
+          } else {
             setRateLimitNotice(null);
-            appendLog(evt.message);
           }
-          if (evt.type === "progress" && evt.stage === "blobs" && evt.path) {
-            setRateLimitNotice(null);
-            setFileProgress({ current: evt.path, processed: evt.index, total: evt.total });
-
-            // Persistimos el sha de este archivo ya subido — si la pagina
-            // se recarga a mitad de camino, el proximo intento lo salta.
-            if (evt.sha) {
-              progressRef.current = { ...progressRef.current, [evt.path]: evt.sha };
-              saveProgress(app, progressRef.current);
-            }
-
-            const tag = evt.unchanged ? "sin cambios" : evt.resumed ? "retomado" : "subido";
-            appendLog(`[${evt.index}/${evt.total}] ${evt.path} (${tag})`, "progress");
-          }
-        }
-      );
-      appendLog("Commit y push completados.", "ok");
+        },
+        onFileDone: (path, sha) => {
+          if (!sha) return;
+          progressRef.current = { ...progressRef.current, [path]: sha };
+          saveProgress(app, progressRef.current);
+        },
+      });
+      if (!ghResult?.noChanges) appendLog("Commit y push completados.", "ok");
 
       // Deploy exitoso — ya no hace falta el progreso guardado.
       clearProgress(app);
