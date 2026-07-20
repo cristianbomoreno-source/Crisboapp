@@ -45,16 +45,15 @@ export async function POST(req, { params }) {
         if (!zipRes.ok) {
           throw new Error(`No se pudo descargar el zip subido (status ${zipRes.status})`);
         }
+        // Solo se descomprime lo que esta tanda realmente necesita — nunca
+        // el zip completo. Para un proyecto de 300 archivos subido en
+        // tandas de 15, esto es la diferencia entre descomprimir 15 o 300
+        // archivos en cada una de las ~20 llamadas.
         const arrayBuffer = await zipRes.arrayBuffer();
-        const allFiles = await extractZip(arrayBuffer);
-
-        // README auto-generado: si esta tanda pide "README.md" y el zip no
-        // lo traia, hay que regenerarlo igual que hizo /deploy/plan, para
-        // que el contenido sea identico al que el cliente ya conto.
+        const wanted = await extractZip(arrayBuffer, { onlyPaths: paths });
         const pathSet = new Set(paths);
-        const wanted = allFiles.filter((f) => pathSet.has(f.path));
         if (pathSet.has("README.md") && !wanted.some((f) => f.path === "README.md")) {
-          const framework = detectFramework(allFiles.map((f) => f.path));
+          const framework = detectFramework(paths);
           wanted.push({ path: "README.md", buffer: Buffer.from(generateReadme(repo, framework), "utf-8") });
         }
 

@@ -2,7 +2,7 @@ import { extractZip, validateProject } from "@/lib/zip";
 import { uploadFilesFTP } from "@/lib/hostinger";
 
 export const runtime = "nodejs";
-export const maxDuration = 300; // ver nota en la ruta de deploy de GitHub
+export const maxDuration = 60; // 60 es el maximo absoluto en el plan Hobby de Vercel
 
 export async function POST(req) {
   const encoder = new TextEncoder();

@@ -8,7 +8,12 @@ export const runtime = "nodejs";
 // archivos = ~1.5min solo en pausas, sin contar la subida en si). 300s es
 // el maximo que soporta un plan Vercel Pro para Serverless Functions; en
 // plan Hobby, Vercel lo recorta a 60s igual sin importar este valor.
-export const maxDuration = 300;
+// 60 es el maximo absoluto que acepta el plan Hobby de Vercel — un valor
+// mayor puede hacer que el build entero falle a la hora de desplegar, no
+// solo esta funcion. Esta ruta especifica ya no la usa el cliente (fue
+// reemplazada por el flujo de 3 pasos en /deploy/plan, /deploy/batch y
+// /deploy/finish), pero igual debe quedar con un valor valido.
+export const maxDuration = 60;
 
 export async function POST(req, { params }) {
   const { owner, repo } = params;
