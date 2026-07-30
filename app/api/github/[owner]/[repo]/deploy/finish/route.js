@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/session";
-import { finalizeCommitFromBlobs } from "@/lib/github";
+import { finalizeCommitFromBlobs, findMissingBlobs } from "@/lib/github";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,9 +22,34 @@ export async function POST(req, { params }) {
 
   try {
     const body = await req.json();
-    const { branch, blobs, message, stats } = body;
+    const { branch, blobs, message, stats, resumedPaths } = body;
     if (!branch || !Array.isArray(blobs) || blobs.length === 0) {
       return NextResponse.json({ error: "Faltan datos para cerrar el deploy." }, { status: 400 });
+    }
+
+    // Si alguno de estos blobs vino de un progreso guardado en el navegador
+    // de un intento anterior (no de esta misma sesion de deploy), confirmamos
+    // que GitHub todavia lo tenga antes de intentar usarlo en el arbol nuevo.
+    // Un blob suelto que nunca llego a un commit puede desaparecer por
+    // garbage collection si paso suficiente tiempo desde que se creo — sin
+    // esta verificacion, eso rompia /git/trees con un 404 dificil de
+    // diagnosticar.
+    if (Array.isArray(resumedPaths) && resumedPaths.length > 0) {
+      const resumedSet = new Set(resumedPaths);
+      const toVerify = blobs.filter((b) => resumedSet.has(b.path));
+      const missing = await findMissingBlobs({ owner, repo, token: session.token, entries: toVerify });
+      if (missing.length > 0) {
+        return NextResponse.json(
+          {
+            error:
+              `${missing.length} archivo(s) del progreso guardado ya no existen en GitHub ` +
+              `(se perdieron por limpieza automatica) — hay que volver a subirlos.`,
+            code: "STALE_BLOBS",
+            stalePaths: missing,
+          },
+          { status: 409 }
+        );
+      }
     }
 
     const result = await finalizeCommitFromBlobs({

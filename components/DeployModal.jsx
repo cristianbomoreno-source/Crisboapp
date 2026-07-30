@@ -65,11 +65,14 @@ async function streamRequest(url, body, onEvent) {
 // Permite retomar una subida a GitHub sin repetir archivos ya enviados si
 // la pagina se recarga o el intento anterior fallo a mitad de camino.
 //
-// Ademas de la verificacion de hash en el servidor (que es la proteccion
-// real contra reusar contenido viejo), el progreso guardado expira solo a
-// las 2 horas — asi nunca queda un resto de un intento muy anterior dando
-// vueltas indefinidamente en el navegador.
-const PROGRESS_TTL_MS = 2 * 60 * 60 * 1000;
+// La proteccion real contra reusar un blob que GitHub ya borro (garbage
+// collection de objetos sueltos que nunca llegaron a un commit) es la
+// verificacion que hace el servidor en /deploy/finish antes de armar el
+// arbol (ver findMissingBlobs en lib/github.js) — si detecta que alguno ya
+// no existe, este archivo lo vuelve a subir solo y reintenta, en vez de
+// fallar. El TTL de abajo es solo higiene adicional, para que un progreso
+// muy viejo no quede dando vueltas indefinidamente en el navegador.
+const PROGRESS_TTL_MS = 45 * 60 * 1000;
 
 function progressKey(app) {
   return `crisbofiles_progress_${app.github.owner}_${app.github.repo}`;
@@ -171,11 +174,18 @@ async function runGithubDeploy({ owner, repo, zipUrl, message, resumeBlobs, onLo
   );
 
   const allBlobs = [...plan.unchanged];
+  // Paths cuyo blob viene de un progreso guardado en el navegador de un
+  // intento ANTERIOR (no de esta misma corrida) — son los unicos con
+  // riesgo real de que GitHub ya los haya borrado (garbage collection de
+  // blobs sueltos que nunca llegaron a un commit). Se informan al servidor
+  // en /deploy/finish para que los verifique antes de usarlos.
+  const resumedPaths = new Set();
   const stillPending = [];
   for (const path of plan.toUpload) {
     const resumed = resumeBlobs?.[path];
     if (resumed) {
       allBlobs.push({ path, sha: resumed });
+      resumedPaths.add(path);
     } else {
       stillPending.push(path);
     }
@@ -188,45 +198,81 @@ async function runGithubDeploy({ owner, repo, zipUrl, message, resumeBlobs, onLo
     onProgress({ current: "", processed, total });
   }
 
-  for (let i = 0; i < stillPending.length; i += BATCH_SIZE) {
-    const batch = stillPending.slice(i, i + BATCH_SIZE);
-    const batchResult = await streamRequest(
-      `/api/github/${owner}/${repo}/deploy/batch`,
-      { zipUrl, branch: plan.branch, paths: batch },
-      (evt) => {
-        if (evt.type === "status" && evt.stage === "rate-limited") {
-          onRateLimit(evt.message);
-          return;
+  // Sube (como blobs nuevos) los archivos de "paths", reemplazando en
+  // allBlobs cualquier entrada previa para ese path (por ejemplo un sha
+  // resumido que resulto estar obsoleto) y sacandolos de resumedPaths ya
+  // que ahora son blobs frescos de esta misma corrida.
+  const uploadFiles = async (paths) => {
+    for (let i = 0; i < paths.length; i += BATCH_SIZE) {
+      const batch = paths.slice(i, i + BATCH_SIZE);
+      const batchResult = await streamRequest(
+        `/api/github/${owner}/${repo}/deploy/batch`,
+        { zipUrl, branch: plan.branch, paths: batch },
+        (evt) => {
+          if (evt.type === "status" && evt.stage === "rate-limited") {
+            onRateLimit(evt.message);
+            return;
+          }
+          if (evt.type === "status") onLog(evt.message);
+          if (evt.type === "progress" && evt.path) {
+            processed++;
+            onRateLimit(null);
+            onProgress({ current: evt.path, processed, total });
+            onFileDone(evt.path, evt.sha);
+          }
         }
-        if (evt.type === "status") onLog(evt.message);
-        if (evt.type === "progress" && evt.path) {
-          processed++;
-          onRateLimit(null);
-          onProgress({ current: evt.path, processed, total });
-          onFileDone(evt.path, evt.sha);
-        }
+      );
+      for (const r of batchResult.results || []) {
+        const idx = allBlobs.findIndex((b) => b.path === r.path);
+        if (idx === -1) allBlobs.push(r);
+        else allBlobs[idx] = r;
+        resumedPaths.delete(r.path);
       }
-    );
-    for (const r of batchResult.results || []) {
-      if (!allBlobs.some((b) => b.path === r.path)) allBlobs.push(r);
     }
-  }
-
-  onLog("Creando el commit final...");
-  const finishRes = await fetch(`/api/github/${owner}/${repo}/deploy/finish`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ branch: plan.branch, blobs: allBlobs, message, stats: plan.stats }),
-  });
-  const finishData = await finishRes.json().catch(() => ({}));
-  if (!finishRes.ok) throw new Error(finishData.error || `No se pudo cerrar el commit (status ${finishRes.status}).`);
-
-  return {
-    commitSha: finishData.commitSha,
-    commitUrl: finishData.commitUrl,
-    stats: finishData.stats || plan.stats,
-    framework: plan.framework,
   };
+
+  await uploadFiles(stillPending);
+
+  // Cierre del commit, con un reintento: si el servidor detecta que algun
+  // blob "resumido" de un intento anterior ya no existe en GitHub (borrado
+  // por garbage collection), se sube de nuevo SOLO ese archivo y se
+  // reintenta una vez, en vez de fallar directo con un error críptico.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    onLog(attempt === 0 ? "Creando el commit final..." : "Archivos actualizados — reintentando el cierre del commit...");
+    const finishRes = await fetch(`/api/github/${owner}/${repo}/deploy/finish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        branch: plan.branch,
+        blobs: allBlobs,
+        message,
+        stats: plan.stats,
+        resumedPaths: [...resumedPaths],
+      }),
+    });
+    const finishData = await finishRes.json().catch(() => ({}));
+
+    if (finishRes.ok) {
+      return {
+        commitSha: finishData.commitSha,
+        commitUrl: finishData.commitUrl,
+        stats: finishData.stats || plan.stats,
+        framework: plan.framework,
+      };
+    }
+
+    if (finishRes.status === 409 && finishData.code === "STALE_BLOBS" && attempt === 0) {
+      const stalePaths = finishData.stalePaths || [];
+      onLog(
+        `${stalePaths.length} archivo(s) del progreso guardado ya no existían en GitHub — subiéndolos de nuevo...`,
+        "warn"
+      );
+      await uploadFiles(stalePaths);
+      continue;
+    }
+
+    throw new Error(finishData.error || `No se pudo cerrar el commit (status ${finishRes.status}).`);
+  }
 }
 
 export default function DeployModal({ app, onClose }) {
