@@ -66,6 +66,12 @@ export async function POST(req, { params }) {
     return NextResponse.json({ commitSha: result.commitSha, commitUrl: result.url, stats });
   } catch (err) {
     console.error("[deploy/finish] error:", err);
-    return NextResponse.json({ error: err.message || String(err) }, { status: 500 });
+    const isGithubNotFoundOnGitData =
+      err.status === 404 && err.data?.documentation_url?.includes("/rest/git/");
+    const message = isGithubNotFoundOnGitData
+      ? "GitHub tardó más de lo esperado en reconocer los archivos recién subidos y el reintento automático no alcanzó. " +
+        "Volvé a intentar el deploy — normalmente se resuelve solo en el segundo intento."
+      : err.message || String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
