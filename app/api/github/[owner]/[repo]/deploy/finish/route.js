@@ -22,34 +22,35 @@ export async function POST(req, { params }) {
 
   try {
     const body = await req.json();
-    const { branch, blobs, message, stats, resumedPaths } = body;
+    const { branch, blobs, message, stats } = body;
     if (!branch || !Array.isArray(blobs) || blobs.length === 0) {
       return NextResponse.json({ error: "Faltan datos para cerrar el deploy." }, { status: 400 });
     }
 
-    // Si alguno de estos blobs vino de un progreso guardado en el navegador
-    // de un intento anterior (no de esta misma sesion de deploy), confirmamos
-    // que GitHub todavia lo tenga antes de intentar usarlo en el arbol nuevo.
-    // Un blob suelto que nunca llego a un commit puede desaparecer por
-    // garbage collection si paso suficiente tiempo desde que se creo — sin
-    // esta verificacion, eso rompia /git/trees con un 404 dificil de
-    // diagnosticar.
-    if (Array.isArray(resumedPaths) && resumedPaths.length > 0) {
-      const resumedSet = new Set(resumedPaths);
-      const toVerify = blobs.filter((b) => resumedSet.has(b.path));
-      const missing = await findMissingBlobs({ owner, repo, token: session.token, entries: toVerify });
-      if (missing.length > 0) {
-        return NextResponse.json(
-          {
-            error:
-              `${missing.length} archivo(s) del progreso guardado ya no existen en GitHub ` +
-              `(se perdieron por limpieza automatica) — hay que volver a subirlos.`,
-            code: "STALE_BLOBS",
-            stalePaths: missing,
-          },
-          { status: 409 }
-        );
-      }
+    // Verificamos TODOS los blobs (no solo los que vienen de un progreso
+    // guardado) antes de armar el arbol. Al principio esto solo cubria los
+    // "resumidos" de localStorage (el caso mas obvio de blob perdido por
+    // garbage collection) — pero el reintento por propagacion transitoria
+    // en finalizeCommitFromBlobs no alcanzo para resolver el problema en la
+    // practica, lo que indica que el blob invalido puede ser cualquiera
+    // (tipicamente uno de los "sin cambios" reusados de /deploy/plan), no
+    // solo uno resumido del navegador. Verificar todos es un poco mas de
+    // llamadas a GitHub, pero permite detectar Y recuperar el archivo
+    // puntual que este fallando, en vez de que el usuario vea un 404 sin
+    // saber cual archivo lo causa.
+    const missing = await findMissingBlobs({ owner, repo, token: session.token, entries: blobs });
+    if (missing.length > 0) {
+      console.warn(`[deploy/finish] ${owner}/${repo}@${branch} — blobs invalidos detectados: ${missing.join(", ")}`);
+      return NextResponse.json(
+        {
+          error:
+            `${missing.length} archivo(s) tenían un blob inválido en GitHub (${missing.slice(0, 3).join(", ")}` +
+            `${missing.length > 3 ? "..." : ""}) — hay que volver a subirlos.`,
+          code: "STALE_BLOBS",
+          stalePaths: missing,
+        },
+        { status: 409 }
+      );
     }
 
     const result = await finalizeCommitFromBlobs({
