@@ -67,6 +67,9 @@ export async function POST(req, { params }) {
     return NextResponse.json({ commitSha: result.commitSha, commitUrl: result.url, stats });
   } catch (err) {
     console.error("[deploy/finish] error:", err);
+    if (err.treeEntries) {
+      console.error("[deploy/finish] entradas del arbol al momento de fallar:", JSON.stringify(err.treeEntries));
+    }
     const isGithubNotFoundOnGitData =
       err.status === 404 && err.data?.documentation_url?.includes("/rest/git/");
     const message = isGithubNotFoundOnGitData
